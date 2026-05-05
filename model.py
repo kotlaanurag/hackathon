@@ -64,13 +64,18 @@ class AzureOpenAILLM:
     def _extract_response_text(self, result: Dict[str, Any]) -> str:
         """
         Extract text from the API response.
-        
+
         Args:
             result: The JSON response from the API
-            
+
         Returns:
             The extracted text content
         """
+        # Fail fast on incomplete responses (e.g. max_output_tokens too small for reasoning models)
+        if result.get("status") == "incomplete":
+            reason = result.get("incomplete_details", {}).get("reason", "unknown")
+            raise Exception(f"LLM response incomplete ({reason}) — increase max_output_tokens")
+
         # Handle chat completions format
         if "choices" in result and len(result["choices"]) > 0:
             choice = result["choices"][0]
@@ -169,9 +174,10 @@ class AzureOpenAILLM:
         payload = {
             "input": input_items,
             "max_output_tokens": max_tokens or self.max_tokens,
-            "model": self.model
+            "model": self.model,
+            "temperature": temperature if temperature is not None else self.temperature,
         }
-        
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url, headers=headers, json=payload)
             
@@ -264,9 +270,10 @@ class AzureOpenAILLM:
         payload = {
             "input": input_items,
             "max_output_tokens": max_tokens or self.max_tokens,
-            "model": self.model
+            "model": self.model,
+            "temperature": temperature if temperature is not None else self.temperature,
         }
-        
+
         with httpx.Client(timeout=120.0) as client:
             response = client.post(url, headers=headers, json=payload)
             

@@ -83,8 +83,11 @@ class CoderAgent(BaseAgent):
             
             # Step 5: Commit changes
             commit_message = await self._generate_commit_message(state.issue, code_changes)
-            self._commit_changes(state.repo_path, commit_message)
-            self.log(f"Committed changes: {commit_message}")
+            committed = self._commit_changes(state.repo_path, commit_message)
+            if committed:
+                self.log(f"Committed changes: {commit_message}")
+            else:
+                self.log(f"Commit skipped or failed: {commit_message}")
             
             state.current_agent = self.name
             state.messages.append({
@@ -384,7 +387,8 @@ class CoderAgent(BaseAgent):
             "QUALITY: type hints on all signatures; specific exception types; structured logging with context.",
             "",
             "## Output:",
-            "Provide ONLY the complete file code. No explanations. No markdown fencing.",
+            "Provide ONLY the complete file code.",
+            "No === FILE: === headers. No markdown fencing. No explanations. Just the raw source code.",
         ])
 
         return "\n".join(p for p in prompt_parts if p is not None)
@@ -392,11 +396,37 @@ class CoderAgent(BaseAgent):
     def _extract_code_from_response(self, response: str, file_path: str) -> str:
         """Extract clean code from LLM response, removing markdown artifacts."""
         code = response.strip()
-        
+
         # Log raw response for debugging
         preview = repr(code[:300]) if len(code) > 300 else repr(code)
         self.log(f"Raw LLM response preview: {preview}", {"file": file_path})
-        
+
+        # 0. Strip === FILE: filename === headers produced by multi-file LLM responses.
+        #    The model sometimes wraps each file in "=== FILE: path ===\n<code>\n=== FILE: ...".
+        #    We want only the block that belongs to the requested file, or the first block if
+        #    no filename match is found.
+        file_header_re = re.compile(r'^===\s*FILE:[^\n]*===\s*\n', re.MULTILINE)
+        if file_header_re.search(code):
+            # Try to find a block whose header contains this file's name
+            escaped = re.escape(os.path.basename(file_path))
+            named_block = re.search(
+                rf'===\s*FILE:[^\n]*{escaped}[^\n]*===\s*\n(.*?)(?:(?:===\s*FILE:)|\Z)',
+                code,
+                re.DOTALL | re.IGNORECASE,
+            )
+            if named_block:
+                code = named_block.group(1).strip()
+                self.log(f"Extracted named file block for {file_path}")
+            else:
+                # Fall back to the content after the first header
+                first_header = file_header_re.search(code)
+                code = code[first_header.end():]
+                next_header = file_header_re.search(code)
+                if next_header:
+                    code = code[:next_header.start()]
+                code = code.strip()
+                self.log(f"Stripped === FILE: === header (no name match)", {"file": file_path})
+
         # 1. Extract from markdown code blocks (most reliable, LLMs understand this well)
         code_block_match = re.search(
             r'```(?:python|py)?\s*\n(.*?)```',
@@ -489,7 +519,7 @@ Output ONLY the commit message, no explanations."""
                 prompt=prompt,
                 system_prompt="You are a helpful assistant that generates git commit messages.",
                 temperature=0.3,
-                max_tokens=100
+                max_tokens=1000  # reasoning models consume tokens before producing output
             )
             
             # Clean up the message
@@ -517,33 +547,31 @@ Output ONLY the commit message, no explanations."""
             
             self.log(f"Wrote file: {full_path}")
     
-    def _commit_changes(self, repo_path: str, message: str) -> None:
-        """Commit the changes to git."""
+    def _commit_changes(self, repo_path: str, message: str) -> bool:
+        """Commit the changes to git. Returns True on success, False on failure."""
         if not repo_path or not os.path.exists(repo_path):
             self.log("Skipping git commit - no repo path")
-            return
-        
+            return False
+
         try:
-            # Stage all changes
             subprocess.run(
                 ["git", "add", "-A"],
                 cwd=repo_path,
                 capture_output=True,
                 check=True
             )
-            
-            # Commit
             subprocess.run(
                 ["git", "commit", "-m", message],
                 cwd=repo_path,
                 capture_output=True,
                 check=True
             )
-            
             self.log(f"Committed: {message}")
-            
+            return True
+
         except subprocess.CalledProcessError as e:
             self.log(f"Git commit failed: {e}")
+            return False
         except FileNotFoundError:
             raise GitNotFoundError("Git is not installed or not found in PATH.")
 

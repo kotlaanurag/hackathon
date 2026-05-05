@@ -341,6 +341,18 @@ class TesterAgent(BaseAgent):
         if not test_file_paths:
             return {"status": "skipped", "reason": "No test files generated"}
 
+        # Verify pytest is installed before attempting to run tests.
+        # Missing pytest is an environment problem, not a code problem — returning
+        # "skipped" prevents the pipeline from triggering a pointless Coder retry loop.
+        env_check = subprocess.run(
+            ["python", "-m", "pytest", "--version"],
+            capture_output=True,
+            text=True,
+        )
+        if env_check.returncode != 0:
+            self.log("pytest not found — skipping test run (install with: pip install pytest)")
+            return {"status": "skipped", "reason": "pytest not installed — run: pip install pytest"}
+
         try:
             result = subprocess.run(
                 ["python", "-m", "pytest"] + test_file_paths + ["-v", "--tb=short"],
