@@ -130,19 +130,15 @@ class ReviewerAgent(BaseAgent):
                 implementation_plan=implementation_plan
             )
 
-            try:
-                response = await self.llm.generate(
-                    prompt=prompt,
-                    system_prompt=self.prompt,
-                    temperature=0.3
-                )
-                findings = self._parse_review_response(response, file_path)
-                all_findings.extend(findings)
-                self.log(f"Found {len(findings)} issues in {file_path}")
-
-            except Exception as e:
-                self.log(f"LLM review failed for {file_path}, running basic checks: {e}")
-                all_findings.extend(self._basic_code_checks(file_path, content))
+            # Call LLM - errors will propagate to user
+            response = await self.llm.generate(
+                prompt=prompt,
+                system_prompt=self.prompt,
+                temperature=0.3
+            )
+            findings = self._parse_review_response(response, file_path)
+            all_findings.extend(findings)
+            self.log(f"Found {len(findings)} issues in {file_path}")
 
         return all_findings
 
@@ -294,39 +290,6 @@ class ReviewerAgent(BaseAgent):
                     return self._parse_review_response(json_match.group(), file_path)
                 except Exception:
                     pass
-
-        return findings
-
-    def _basic_code_checks(self, file_path: str, content: str) -> List[ReviewFinding]:
-        """Fallback static checks used when LLM call fails."""
-        findings = []
-
-        if not file_path.endswith('.py'):
-            return findings
-
-        lines = content.split('\n') if content else []
-
-        for i, line in enumerate(lines, 1):
-            if len(line) > 120:
-                findings.append(ReviewFinding(
-                    file=file_path, line=i, severity=Severity.WARNING,
-                    message=f"Line exceeds 120 characters ({len(line)} chars)",
-                    suggestion="Break this line into multiple lines"
-                ))
-
-            if re.search(r'(password|secret|api_key)\s*=\s*["\'][^"\']+["\']', line, re.IGNORECASE):
-                findings.append(ReviewFinding(
-                    file=file_path, line=i, severity=Severity.ERROR,
-                    message="Potential hardcoded secret detected",
-                    suggestion="Use environment variables or a secrets manager"
-                ))
-
-            if re.match(r'\s*except\s*:', line):
-                findings.append(ReviewFinding(
-                    file=file_path, line=i, severity=Severity.WARNING,
-                    message="Bare except clause detected",
-                    suggestion="Specify the exception type(s) to catch"
-                ))
 
         return findings
 

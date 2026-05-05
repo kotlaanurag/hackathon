@@ -124,22 +124,17 @@ class AnalystAgent(BaseAgent):
             file_contents=file_contents
         )
 
-        try:
-            response = await self.llm.generate(
-                prompt=prompt,
-                system_prompt=self.prompt,
-                temperature=0.4
-            )
-            plan = self._parse_plan_response(response)
-            self.log("LLM generated implementation plan", {
-                "summary": plan.get("summary", "")[:100]
-            })
-            return plan
-
-        except Exception as e:
-            self.log(f"LLM planning failed, using fallback: {e}", {"error": str(e)})
-            state_errors = [f"LLM planning failed: {e}"]
-            return self._create_fallback_plan(issue, repo_context, state_errors)
+        # Call LLM - errors will propagate to user
+        response = await self.llm.generate(
+            prompt=prompt,
+            system_prompt=self.prompt,
+            temperature=0.4
+        )
+        plan = self._parse_plan_response(response)
+        self.log("LLM generated implementation plan", {
+            "summary": plan.get("summary", "")[:100]
+        })
+        return plan
 
     def _build_planning_prompt(
         self,
@@ -306,41 +301,6 @@ class AnalystAgent(BaseAgent):
                 "risks": [],
                 "testing_requirements": "Add appropriate tests"
             }
-
-    def _create_fallback_plan(
-        self,
-        issue: str,
-        repo_context: Dict,
-        errors: List[str]
-    ) -> Dict[str, Any]:
-        """Create a minimal fallback plan when LLM fails — signals to the user that manual review is needed."""
-        return {
-            "summary": f"[FALLBACK — LLM planning failed] {issue[:150]}",
-            "action_type": self._detect_issue_type(issue),
-            "steps": [
-                {"step": 1, "action": "Review the issue and identify files to change"},
-                {"step": 2, "action": "Implement requested changes"},
-                {"step": 3, "action": "Add error handling and tests"},
-            ],
-            "files_to_create": [],
-            "files_to_modify": [],
-            "dependencies": [],
-            "estimated_complexity": "medium",
-            "risks": ["LLM planning failed — plan was auto-generated and requires manual review"],
-            "fallback_errors": errors,
-            "testing_requirements": "Add appropriate unit tests"
-        }
-
-    def _detect_issue_type(self, issue: str) -> str:
-        """Detect the type of issue."""
-        issue_lower = issue.lower()
-        if any(word in issue_lower for word in ["bug", "fix", "error", "broken"]):
-            return "bugfix"
-        elif any(word in issue_lower for word in ["add", "create", "implement", "new"]):
-            return "feature"
-        elif any(word in issue_lower for word in ["refactor", "improve", "optimize"]):
-            return "refactor"
-        return "enhancement"
 
     def _read_repo_structure(self, repo_path: str) -> Dict[str, Any]:
         """Read repository structure from disk (fallback when RepoReader hasn't run)."""

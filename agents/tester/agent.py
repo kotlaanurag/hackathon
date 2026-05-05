@@ -116,22 +116,18 @@ class TesterAgent(BaseAgent):
                 implementation_plan=implementation_plan
             )
 
-            try:
-                generated_tests = await self.llm.generate(
-                    prompt=prompt,
-                    system_prompt=self.prompt,
-                    temperature=0.3
-                )
-                clean_tests = self._extract_code_from_response(generated_tests)
-                test_files[test_file_path] = clean_tests
-                self.log(f"Generated tests for {file_path}", {
-                    "test_file": test_file_path,
-                    "length": len(clean_tests)
-                })
-
-            except Exception as e:
-                self.log(f"LLM test generation failed for {file_path}, using fallback: {e}")
-                test_files[test_file_path] = self._generate_fallback_tests(file_path, content)
+            # Call LLM - errors will propagate to user
+            generated_tests = await self.llm.generate(
+                prompt=prompt,
+                system_prompt=self.prompt,
+                temperature=0.3
+            )
+            clean_tests = self._extract_code_from_response(generated_tests)
+            test_files[test_file_path] = clean_tests
+            self.log(f"Generated tests for {file_path}", {
+                "test_file": test_file_path,
+                "length": len(clean_tests)
+            })
 
         return test_files
 
@@ -265,87 +261,6 @@ class TesterAgent(BaseAgent):
             if match:
                 return match.group(1).strip()
         return code
-
-    def _generate_fallback_tests(self, file_path: str, source_code: str) -> str:
-        """Generate basic skeleton tests when LLM fails."""
-        module_name = os.path.splitext(os.path.basename(file_path))[0]
-        classes = self._extract_classes(source_code)
-        functions = self._extract_functions(source_code)
-
-        lines = [
-            f'"""Tests for {module_name} module - auto-generated."""',
-            "",
-            "import pytest",
-            "import sys",
-            "import os",
-            "",
-            "sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))",
-            "",
-            f"from {module_name} import *",
-            "",
-            ""
-        ]
-
-        for cls in classes:
-            lines.append(f"class Test{cls['name']}:")
-            lines.append(f'    """Tests for {cls["name"]} class."""')
-            lines.append("")
-            lines.append("    @pytest.fixture")
-            lines.append("    def instance(self):")
-            lines.append(f'        """Create {cls["name"]} instance."""')
-            lines.append(f"        return {cls['name']}()")
-            lines.append("")
-            for method in cls.get("methods", []):
-                lines.append(f"    def test_{method}(self, instance):")
-                lines.append(f'        """Test {method} method."""')
-                lines.append("        pass")
-                lines.append("")
-
-        if functions:
-            lines.append("class TestFunctions:")
-            lines.append('    """Tests for standalone functions."""')
-            lines.append("")
-            for func in functions:
-                lines.append(f"    def test_{func['name']}(self):")
-                lines.append(f'        """Test {func["name"]} function."""')
-                lines.append("        pass")
-                lines.append("")
-
-        return "\n".join(lines)
-
-    def _extract_classes(self, content: str) -> List[Dict[str, Any]]:
-        """Extract class definitions and their public methods from source code."""
-        classes = []
-        lines = content.split('\n')
-        current_class = None
-
-        for i, line in enumerate(lines):
-            class_match = re.match(r'class\s+(\w+)(?:\([^)]*\))?:', line)
-            if class_match:
-                if current_class:
-                    classes.append(current_class)
-                current_class = {"name": class_match.group(1), "methods": [], "line": i + 1}
-            elif current_class and line.startswith('    def '):
-                method_match = re.match(r'\s+def\s+(\w+)\s*\([^)]*\)', line)
-                if method_match:
-                    name = method_match.group(1)
-                    if not name.startswith('_'):
-                        current_class["methods"].append(name)
-
-        if current_class:
-            classes.append(current_class)
-        return classes
-
-    def _extract_functions(self, content: str) -> List[Dict[str, Any]]:
-        """Extract top-level (non-indented) public function definitions."""
-        functions = []
-        for i, line in enumerate(content.split('\n')):
-            match = re.match(r'^def\s+(\w+)\s*\([^)]*\)', line)
-            if match:
-                name = match.group(1)
-                if not name.startswith('_'):
-                    functions.append({"name": name, "line": i + 1})
-        return functions
 
     def _get_test_file_path(self, source_file: str) -> str:
         """Compute the test file path for a given source file."""

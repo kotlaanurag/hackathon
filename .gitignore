@@ -14,9 +14,6 @@ __pycache__/
 dist/
 build/
 
-# Logs
-logs/*.log
-logs/*.jsonl
 
 # Environment variables
 .env
@@ -30,3 +27,6 @@ logs/*.jsonl
 # OS
 .DS_Store
 Thumbs.db
+
+# Repos
+.repos/

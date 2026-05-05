@@ -1,25 +1,19 @@
-"""Azure OpenAI LLM Integration for all agents."""
+"""Azure OpenAI LLM Integration for all agents using direct HTTP calls."""
 
 import os
-import json
 import httpx
 from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
-from langchain_core.language_models.base import BaseLanguageModel
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.callbacks.manager import CallbackManagerForLLMRun
-from pydantic import Field
 
 load_dotenv()
 
 
 class AzureOpenAILLM:
     """
-    Azure OpenAI LLM client using the Responses API.
+    Azure OpenAI LLM client using direct HTTP calls to Azure Cognitive Services.
     
     This class provides a simple interface to call Azure OpenAI models
-    using the API endpoint and configuration from environment variables.
+    using the Azure OpenAI Responses API endpoint.
     """
     
     def __init__(
@@ -51,16 +45,14 @@ class AzureOpenAILLM:
         
         # Validate configuration
         if not self.api_key:
-            raise ValueError("AZURE_API_KEY is required")
+            raise ValueError("AZURE_API_KEY is required. Please set it in your .env file.")
         if not self.endpoint:
-            raise ValueError("AZURE_ENDPOINT is required")
+            raise ValueError("AZURE_ENDPOINT is required (e.g., https://YOUR-RESOURCE.cognitiveservices.azure.com/openai/responses)")
     
     def _build_url(self) -> str:
         """Build the API URL with version parameter."""
         base = self.endpoint.rstrip("/")
-        if "?" not in base:
-            return f"{base}?api-version={self.api_version}"
-        return f"{base}&api-version={self.api_version}"
+        return f"{base}?api-version={self.api_version}"
     
     def _build_headers(self) -> Dict[str, str]:
         """Build the request headers."""
@@ -68,6 +60,38 @@ class AzureOpenAILLM:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
+    
+    def _extract_response_text(self, result: Dict[str, Any]) -> str:
+        """
+        Extract text from the API response.
+        
+        Args:
+            result: The JSON response from the API
+            
+        Returns:
+            The extracted text content
+        """
+        # Handle chat completions format
+        if "choices" in result and len(result["choices"]) > 0:
+            choice = result["choices"][0]
+            if "message" in choice:
+                return choice["message"].get("content", "")
+            elif "text" in choice:
+                return choice["text"]
+        
+        # Handle responses API format
+        if "output" in result:
+            output = result["output"]
+            if isinstance(output, list) and len(output) > 0:
+                for item in output:
+                    if item.get("type") == "message":
+                        content = item.get("content", [])
+                        for c in content:
+                            if c.get("type") == "output_text":
+                                return c.get("text", "")
+        
+        # If we can't parse it, raise an error
+        raise Exception(f"Unable to parse LLM response: {result}")
     
     async def generate(
         self,
@@ -77,7 +101,7 @@ class AzureOpenAILLM:
         temperature: Optional[float] = None
     ) -> str:
         """
-        Generate a completion from the LLM.
+        Generate a completion from the LLM (async).
         
         Args:
             prompt: The user prompt/message
@@ -87,6 +111,9 @@ class AzureOpenAILLM:
             
         Returns:
             The generated text response
+            
+        Raises:
+            Exception: If the LLM call fails
         """
         messages = []
         
@@ -114,7 +141,7 @@ class AzureOpenAILLM:
         temperature: Optional[float] = None
     ) -> str:
         """
-        Send a chat completion request.
+        Send a chat completion request (async).
         
         Args:
             messages: List of message dicts with 'role' and 'content'
@@ -123,44 +150,43 @@ class AzureOpenAILLM:
             
         Returns:
             The generated text response
+            
+        Raises:
+            Exception: If the LLM call fails with detailed error message
         """
         url = self._build_url()
         headers = self._build_headers()
         
+        # Build input for Responses API format
+        input_items = []
+        for msg in messages:
+            input_items.append({
+                "type": "message",
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+        
         payload = {
-            "messages": messages,
-            "max_completion_tokens": max_tokens or self.max_tokens,
-            "model": self.model,
-            "temperature": temperature if temperature is not None else self.temperature
+            "input": input_items,
+            "max_output_tokens": max_tokens or self.max_tokens,
+            "model": self.model
         }
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(url, headers=headers, json=payload)
             
             if response.status_code != 200:
-                raise Exception(f"Azure API error: {response.status_code} - {response.text}")
+                error_detail = response.text
+                raise Exception(
+                    f"LLM API call failed!\n"
+                    f"Status Code: {response.status_code}\n"
+                    f"Endpoint: {url}\n"
+                    f"Model: {self.model}\n"
+                    f"Error: {error_detail}"
+                )
             
             result = response.json()
-            
-            # Handle different response formats
-            if "choices" in result and len(result["choices"]) > 0:
-                choice = result["choices"][0]
-                if "message" in choice:
-                    return choice["message"].get("content", "")
-                elif "text" in choice:
-                    return choice["text"]
-            elif "output" in result:
-                # Handle responses API format
-                output = result["output"]
-                if isinstance(output, list) and len(output) > 0:
-                    for item in output:
-                        if item.get("type") == "message":
-                            content = item.get("content", [])
-                            for c in content:
-                                if c.get("type") == "output_text":
-                                    return c.get("text", "")
-            
-            return str(result)
+            return self._extract_response_text(result)
     
     def generate_sync(
         self,
@@ -180,6 +206,9 @@ class AzureOpenAILLM:
             
         Returns:
             The generated text response
+            
+        Raises:
+            Exception: If the LLM call fails
         """
         messages = []
         
@@ -216,44 +245,43 @@ class AzureOpenAILLM:
             
         Returns:
             The generated text response
+            
+        Raises:
+            Exception: If the LLM call fails with detailed error message
         """
         url = self._build_url()
         headers = self._build_headers()
         
+        # Build input for Responses API format
+        input_items = []
+        for msg in messages:
+            input_items.append({
+                "type": "message",
+                "role": msg["role"],
+                "content": msg["content"]
+            })
+        
         payload = {
-            "messages": messages,
-            "max_completion_tokens": max_tokens or self.max_tokens,
-            "model": self.model,
-            "temperature": temperature if temperature is not None else self.temperature
+            "input": input_items,
+            "max_output_tokens": max_tokens or self.max_tokens,
+            "model": self.model
         }
         
         with httpx.Client(timeout=120.0) as client:
             response = client.post(url, headers=headers, json=payload)
             
             if response.status_code != 200:
-                raise Exception(f"Azure API error: {response.status_code} - {response.text}")
+                error_detail = response.text
+                raise Exception(
+                    f"LLM API call failed!\n"
+                    f"Status Code: {response.status_code}\n"
+                    f"Endpoint: {url}\n"
+                    f"Model: {self.model}\n"
+                    f"Error: {error_detail}"
+                )
             
             result = response.json()
-            
-            # Handle different response formats
-            if "choices" in result and len(result["choices"]) > 0:
-                choice = result["choices"][0]
-                if "message" in choice:
-                    return choice["message"].get("content", "")
-                elif "text" in choice:
-                    return choice["text"]
-            elif "output" in result:
-                # Handle responses API format
-                output = result["output"]
-                if isinstance(output, list) and len(output) > 0:
-                    for item in output:
-                        if item.get("type") == "message":
-                            content = item.get("content", [])
-                            for c in content:
-                                if c.get("type") == "output_text":
-                                    return c.get("text", "")
-            
-            return str(result)
+            return self._extract_response_text(result)
 
 
 # Global LLM instance (lazy initialization)

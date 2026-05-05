@@ -121,28 +121,23 @@ Analyze the following development request and extract complete, structured requi
 
 Provide ONLY the JSON object, no additional text."""
 
-        try:
-            response = await self.llm.generate(
-                prompt=prompt,
-                system_prompt=self.prompt,
-                temperature=0.3
-            )
-            
-            # Parse the response as JSON
-            requirements = self._parse_json_response(response)
-            requirements["raw_issue"] = issue  # Ensure we keep the original
-            
-            self.log("LLM parsed requirements", {
-                "type": requirements.get("type"),
-                "complexity": requirements.get("estimated_complexity")
-            })
-            
-            return requirements
-            
-        except Exception as e:
-            self.log(f"LLM parsing failed: {e}")
-            # Fallback to basic parsing
-            return self._basic_parse_requirements(issue)
+        # Call LLM - errors will propagate to user
+        response = await self.llm.generate(
+            prompt=prompt,
+            system_prompt=self.prompt,
+            temperature=0.3
+        )
+        
+        # Parse the response as JSON
+        requirements = self._parse_json_response(response)
+        requirements["raw_issue"] = issue  # Ensure we keep the original
+        
+        self.log("LLM parsed requirements", {
+            "type": requirements.get("type"),
+            "complexity": requirements.get("estimated_complexity")
+        })
+        
+        return requirements
     
     def _parse_json_response(self, response: str) -> Dict[str, Any]:
         """Parse JSON from LLM response."""
@@ -176,36 +171,5 @@ Provide ONLY the JSON object, no additional text."""
                 "estimated_complexity": "medium"
             }
     
-    def _basic_parse_requirements(self, issue: str) -> Dict[str, Any]:
-        """Basic fallback parsing when LLM fails."""
-        return {
-            "raw_issue": issue,
-            "type": self._detect_issue_type(issue),
-            "summary": issue[:200],
-            "key_requirements": [],
-            "priority": "normal",
-            "estimated_complexity": self._estimate_complexity(issue)
-        }
-    
-    def _detect_issue_type(self, issue: str) -> str:
-        """Detect the type of issue (feature, bugfix, refactor, etc.)."""
-        issue_lower = issue.lower()
-        if any(word in issue_lower for word in ["bug", "fix", "error", "broken"]):
-            return "bugfix"
-        elif any(word in issue_lower for word in ["add", "create", "implement", "new"]):
-            return "feature"
-        elif any(word in issue_lower for word in ["refactor", "improve", "optimize"]):
-            return "refactor"
-        else:
-            return "enhancement"
-    
-    def _estimate_complexity(self, issue: str) -> str:
-        """Estimate the complexity of the issue."""
-        word_count = len(issue.split())
-        if word_count < 20:
-            return "low"
-        elif word_count < 50:
-            return "medium"
-        else:
-            return "high"
+
     

@@ -113,6 +113,11 @@ class CoderAgent(BaseAgent):
             ast.parse(code)
             return None
         except SyntaxError as exc:
+            # Log the problematic line for debugging
+            lines = code.split('\n')
+            if exc.lineno and exc.lineno <= len(lines):
+                problem_line = lines[exc.lineno - 1]
+                self.log(f"Syntax error at line {exc.lineno}: {repr(problem_line[:100])}", {"file": file_path})
             return f"SyntaxError in {file_path} at line {exc.lineno}: {exc.msg}"
 
     def _read_files_from_disk(self, repo_path: str, file_paths: List[str]) -> Dict[str, str]:
@@ -388,26 +393,54 @@ class CoderAgent(BaseAgent):
         """Extract clean code from LLM response, removing markdown artifacts."""
         code = response.strip()
         
-        # Remove markdown code blocks if present
-        # Match ```python or ```py or just ```
+        # Log raw response for debugging
+        preview = repr(code[:300]) if len(code) > 300 else repr(code)
+        self.log(f"Raw LLM response preview: {preview}", {"file": file_path})
+        
+        # 1. Extract from markdown code blocks (most reliable, LLMs understand this well)
+        code_block_match = re.search(
+            r'```(?:python|py)?\s*\n(.*?)```',
+            code,
+            re.DOTALL | re.IGNORECASE
+        )
+        if code_block_match:
+            extracted = code_block_match.group(1).strip()
+            self.log(f"Extracted from markdown code block", {"length": len(extracted)})
+            return extracted
+        
+        # 2. Try full-response patterns (response is entirely a code block)
         patterns = [
-            r'^```(?:python|py|javascript|js|typescript|ts|java|go|rust|c|cpp|csharp|cs)?\n?(.*?)```$',
-            r'^```\n?(.*?)```$'
+            r'^```(?:python|py|javascript|js|typescript|ts|java|go|rust|c|cpp|csharp|cs)?\s*\n?(.*?)```\s*$',
+            r'^```\s*\n?(.*?)```\s*$'
         ]
         
         for pattern in patterns:
             match = re.match(pattern, code, re.DOTALL | re.IGNORECASE)
             if match:
-                code = match.group(1).strip()
-                break
+                extracted = match.group(1).strip()
+                self.log(f"Extracted from full code block", {"length": len(extracted)})
+                return extracted
+        
+        # 3. No code block found - clean up raw response
+        self.log(f"No code block found, cleaning raw response", {"length": len(code)})
+        
+        # Remove common preamble text
+        preamble_patterns = [
+            r"^Here(?:'s| is) the (?:complete |updated |fixed )?(?:code|file|implementation)[:\s]*\n+",
+            r"^Below is the (?:complete |updated )?(?:code|file)[:\s]*\n+",
+            r"^(?:Sure|Certainly|Of course)[,!]?\s*(?:here(?:'s| is))?[:\s]*\n+",
+        ]
+        for pattern in preamble_patterns:
+            code = re.sub(pattern, "", code, flags=re.IGNORECASE)
+        
+        # Remove trailing explanations
+        code = re.sub(r"\n\n(?:This (?:code|implementation)|Note:|Explanation:).*$", "", code, flags=re.DOTALL | re.IGNORECASE)
         
         # Remove any leading/trailing quotes
-        if code.startswith('"""') and code.endswith('"""'):
-            pass  # This is a docstring, keep it
-        elif code.startswith('"') and code.endswith('"'):
+        if code.startswith('"') and code.endswith('"') and not code.startswith('"""'):
             code = code[1:-1]
         
-        return code
+        return code.strip()
     
     def _create_placeholder_file(self, file_path: str, issue: str) -> str:
         """Create a placeholder file when LLM generation fails."""
