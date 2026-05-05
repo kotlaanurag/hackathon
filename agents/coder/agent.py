@@ -5,7 +5,7 @@ import subprocess
 import re
 import json
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Annotated, TypedDict
+from typing import Dict, Any, List, Optional
 from agents.base import BaseAgent, AgentState
 from prompts import get_prompt
 from model import get_llm
@@ -47,10 +47,13 @@ class CoderAgent(BaseAgent):
         })
         
         try:
-            # Step 1: Create a new branch
-            branch_name = self._create_branch(state.repo_path, state.issue)
-            state.branch_name = branch_name
-            self.log(f"Created branch: {branch_name}")
+            # Step 1: Create a branch only if one doesn't already exist (e.g. review loop-back)
+            if not state.branch_name:
+                branch_name = self._create_branch(state.repo_path, state.issue)
+                state.branch_name = branch_name
+                self.log(f"Created branch: {branch_name}")
+            else:
+                self.log(f"Reusing existing branch: {state.branch_name}")
             
             # Step 2: Get repo context and file contents
             repo_context = self._get_repo_context_from_messages(state)
@@ -82,7 +85,7 @@ class CoderAgent(BaseAgent):
                 "agent": self.name,
                 "action": "code_implemented",
                 "data": {
-                    "branch": branch_name,
+                    "branch": state.branch_name,
                     "files_changed": list(code_changes.keys()),
                     "commit_message": commit_message
                 }
@@ -238,65 +241,114 @@ class CoderAgent(BaseAgent):
         repo_context: Dict[str, Any],
         existing_content: str
     ) -> str:
-        """Build a comprehensive prompt for code generation."""
-        
-        # Extract relevant info from implementation plan
+        """Build a comprehensive SDLC-aware prompt for production-quality code generation."""
+
         plan_summary = implementation_plan.get("summary", "")
+        design_approach = implementation_plan.get("design_approach", "")
         steps = implementation_plan.get("steps", [])
-        dependencies = implementation_plan.get("dependencies", [])
-        
+        security_considerations = implementation_plan.get("security_considerations", [])
+        error_handling_strategy = implementation_plan.get("error_handling_strategy", "")
+
+        # Find the file-specific plan entry
+        file_plan = ""
+        for f in implementation_plan.get("files_to_create", []):
+            if isinstance(f, dict) and f.get("path") == file_path:
+                file_plan = f"Purpose: {f.get('purpose', '')} | Exports: {', '.join(f.get('exports', []))}"
+        if not file_plan:
+            for f in implementation_plan.get("files_to_modify", []):
+                if isinstance(f, dict) and f.get("path") == file_path:
+                    file_plan = f"Current: {f.get('current_state', '')} | Changes: {f.get('changes', '')}"
+
+        main_language = repo_context.get("main_language", "Python")
+        frameworks = ", ".join(repo_context.get("frameworks", [])) or "None detected"
+
         prompt_parts = [
-            "Generate complete, production-ready code for the following file.",
+            "You are Jordan, Senior Software Engineer in the Implementation phase of the SDLC.",
+            "Write production-ready code as if a tired senior engineer will maintain it at 2 AM during an incident.",
+            "Make it obvious, safe, and correct. Follow the plan precisely — no gold-plating.",
             "",
-            f"## File to Generate: {file_path}",
+            f"## File: {file_path}",
+            f"## Plan for this file: {file_plan}" if file_plan else "",
             "",
-            f"## User Request:",
+            "## User Request:",
             issue,
             "",
-            f"## Implementation Plan:",
+            "## Implementation Plan:",
             plan_summary if plan_summary else "Implement the requested functionality.",
-            ""
         ]
-        
+
+        if design_approach:
+            prompt_parts.extend(["", f"## Design Approach: {design_approach}"])
+
         if steps:
-            prompt_parts.append("## Steps to Implement:")
+            prompt_parts.extend(["", "## Implementation Steps (follow in order):"])
             for i, step in enumerate(steps, 1):
-                prompt_parts.append(f"{i}. {step}")
-            prompt_parts.append("")
-        
-        if repo_context:
-            prompt_parts.append("## Repository Context:")
-            prompt_parts.append(f"- Main Language: {repo_context.get('main_language', 'Python')}")
-            prompt_parts.append(f"- Project Type: {repo_context.get('project_type', 'Unknown')}")
-            if repo_context.get("frameworks"):
-                prompt_parts.append(f"- Frameworks: {', '.join(repo_context.get('frameworks', []))}")
-            prompt_parts.append("")
-        
-        if existing_content:
-            prompt_parts.append("## Existing File Content (to modify/extend):")
-            prompt_parts.append("```")
-            prompt_parts.append(existing_content[:3000])  # Limit to avoid token overflow
-            if len(existing_content) > 3000:
-                prompt_parts.append("... (truncated)")
-            prompt_parts.append("```")
-            prompt_parts.append("")
-        
+                if isinstance(step, dict):
+                    action = step.get("action", "")
+                    desc = step.get("description", "")
+                    step_text = f"{action}: {desc}".strip(": ")
+                    prompt_parts.append(f"{i}. {step_text}")
+                else:
+                    prompt_parts.append(f"{i}. {step}")
+
         prompt_parts.extend([
-            "## Requirements:",
-            "1. Generate complete, working code",
-            "2. Include proper imports and dependencies",
-            "3. Add comprehensive docstrings and comments",
-            "4. Include type hints for Python",
-            "5. Follow best practices and coding standards",
-            "6. Handle errors gracefully",
-            "7. Make the code secure (no hardcoded secrets)",
+            "",
+            "## Repository Context:",
+            f"- Language: {main_language}",
+            f"- Project Type: {repo_context.get('project_type', 'Unknown')}",
+            f"- Frameworks: {frameworks}",
+            "",
+        ])
+
+        if existing_content:
+            prompt_parts.extend([
+                "## Existing File (match its style exactly — naming, imports, patterns):",
+                "```",
+                existing_content[:3000],
+                *( ["... (truncated)"] if len(existing_content) > 3000 else [] ),
+                "```",
+                "",
+            ])
+
+        if security_considerations:
+            prompt_parts.extend([
+                "## Security Requirements (non-negotiable):",
+                *[f"- {s}" for s in security_considerations],
+                "",
+            ])
+
+        if error_handling_strategy:
+            prompt_parts.extend([
+                f"## Error Handling Strategy: {error_handling_strategy}",
+                "",
+            ])
+
+        prompt_parts.extend([
+            "## Mandatory Code Standards:",
+            "SECURITY (non-negotiable):",
+            "  - NEVER hardcode passwords, API keys, tokens — use os.getenv()",
+            "  - Hash passwords with bcrypt or argon2id — never MD5, SHA1, or plaintext",
+            "  - Use parameterised queries for ALL database operations — no string-concatenated SQL",
+            "  - Validate and sanitise ALL user inputs before any operation",
+            "  - Add auth/permission checks before every data access operation",
+            "",
+            "CODE QUALITY:",
+            "  - Type hints on ALL function signatures (parameters AND return type)",
+            "  - Docstrings on all public classes and methods (Google style)",
+            "  - Catch specific exception types — never bare `except:`",
+            "  - Log errors with context before re-raising: include user_id, request_id, file path",
+            "  - Use f-strings for formatting; avoid % and .format()",
+            "  - Prefer dataclasses or Pydantic models over plain dicts for structured data",
+            "",
+            "OBSERVABILITY:",
+            "  - Log at INFO for business events, ERROR for failures, DEBUG for dev details",
+            "  - Include contextual info in every log line (user_id, file, operation)",
             "",
             "## Output:",
-            "Provide ONLY the complete code for the file, no explanations.",
-            "Do not wrap in markdown code blocks."
+            "Provide ONLY the complete file code. No explanations. No markdown fencing.",
         ])
-        
-        return "\n".join(prompt_parts)
+
+        return "\n".join(p for p in prompt_parts if p is not None)
     
     def _extract_code_from_response(self, response: str, file_path: str) -> str:
         """Extract clean code from LLM response, removing markdown artifacts."""

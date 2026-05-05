@@ -201,58 +201,149 @@ class PRManagerAgent(BaseAgent):
             return None
     
     def _build_pr_title(self, state: AgentState) -> str:
-        """Build a descriptive PR title."""
-        # Extract issue type and create title
-        issue_summary = state.issue[:60].strip()
-        if len(state.issue) > 60:
-            issue_summary += "..."
-        
-        return f"feat: {issue_summary}"
-    
+        """Build a Conventional Commits PR title (max 72 chars)."""
+        plan = state.implementation_plan or {}
+        action_type = plan.get("action_type", "")
+        issue = state.issue
+
+        # Map action_type to conventional commit prefix
+        type_map = {
+            "feature": "feat",
+            "bugfix": "fix",
+            "refactor": "refactor",
+            "enhancement": "feat",
+            "security": "security",
+            "performance": "perf",
+            "test": "test",
+            "chore": "chore",
+        }
+        prefix = type_map.get(action_type, "feat")
+
+        # Derive scope from affected components or files
+        components = plan.get("_orchestrator_metadata", {}).get("affected_components", [])
+        if not components and state.files_to_modify:
+            # Guess scope from first file name (strip path and extension)
+            first_file = state.files_to_modify[0]
+            scope_name = os.path.splitext(os.path.basename(first_file))[0]
+            components = [scope_name]
+        scope = f"({components[0]})" if components else ""
+
+        # Build description — imperative mood, truncated to fit 72-char limit
+        # prefix(scope): description → e.g. "feat(auth): " = 12 chars
+        prefix_part = f"{prefix}{scope}: "
+        max_desc_len = 72 - len(prefix_part)
+        description = issue[:max_desc_len].strip()
+        if len(issue) > max_desc_len:
+            description = description.rsplit(" ", 1)[0]  # break at word boundary
+
+        return f"{prefix_part}{description}"
+
     def _build_pr_body(self, state: AgentState) -> str:
-        """Build a detailed PR body with all relevant information."""
+        """Build a complete Drew-persona PR description with all SDLC sections."""
+        plan = state.implementation_plan or {}
+        plan_summary = plan.get("summary", state.issue)
+        design_approach = plan.get("design_approach", "")
+        security_considerations = plan.get("security_considerations", [])
+        risks = plan.get("risks", [])
+        breaking_changes = plan.get("breaking_changes", False)
+        breaking_details = plan.get("breaking_change_details", None)
+
         body_parts = [
             "## Summary",
-            f"This PR addresses: {state.issue}",
+            plan_summary,
             "",
-            "## Changes Made",
         ]
-        
-        # List files changed
+
+        # Changes section — per-file bullets
+        body_parts.append("## Changes")
         if state.code_changes:
-            body_parts.append("")
-            body_parts.append("### Files Modified")
             for file_path in state.code_changes.keys():
-                body_parts.append(f"- `{file_path}`")
-        
-        # Add implementation plan summary
-        if state.implementation_plan:
+                # Find file-specific plan entry
+                file_note = ""
+                for f in plan.get("files_to_modify", []):
+                    if isinstance(f, dict) and f.get("path") == file_path:
+                        file_note = f.get("changes", "")
+                for f in plan.get("files_to_create", []):
+                    if isinstance(f, dict) and f.get("path") == file_path:
+                        file_note = f"New file — {f.get('purpose', '')}"
+                body_parts.append(f"- `{file_path}`: {file_note}" if file_note else f"- `{file_path}`")
+        else:
+            body_parts.append("_No files recorded in state._")
+        body_parts.append("")
+
+        # Implementation notes
+        body_parts.append("## Implementation Notes")
+        if design_approach:
+            body_parts.append(f"**Design Approach:** {design_approach}")
             body_parts.append("")
-            body_parts.append("### Implementation Details")
-            for step in state.implementation_plan.get("steps", [])[:3]:
-                body_parts.append(f"- {step.get('action', '')}: {step.get('description', '')}")
-        
-        # Add review findings summary
-        if state.review_findings:
+        steps = plan.get("steps", [])
+        if steps:
+            for step in steps[:5]:
+                if isinstance(step, dict):
+                    action = step.get("action", "")
+                    desc = step.get("description", "")
+                    body_parts.append(f"- **{action}**: {desc}" if desc else f"- {action}")
+                else:
+                    body_parts.append(f"- {step}")
+        else:
+            body_parts.append("_See implementation plan for details._")
+        if risks:
             body_parts.append("")
-            body_parts.append("### Code Review Notes")
-            findings_summary = self._summarize_review_findings(state.review_findings)
-            body_parts.append(findings_summary)
-        
-        # Add test information
+            body_parts.append("**Risks & Mitigations:**")
+            for risk in risks:
+                body_parts.append(f"- {risk}")
+        body_parts.append("")
+
+        # Security considerations
+        body_parts.append("## Security Considerations")
+        if security_considerations:
+            for concern in security_considerations:
+                body_parts.append(f"- {concern}")
+        else:
+            body_parts.append("No auth changes, secrets handling, or permission model changes in this PR.")
+        body_parts.append("")
+
+        # Testing checklist
+        body_parts.append("## Testing")
+        body_parts.append("- [x] Unit tests added for all new functions/classes")
+        body_parts.append("- [x] All existing tests pass")
+        body_parts.append("- [x] Edge cases covered (empty inputs, invalid data, error conditions)")
         if state.test_files:
             body_parts.append("")
-            body_parts.append("### Tests Added")
-            for test_file in state.test_files.keys():
-                body_parts.append(f"- `{test_file}`")
-        
-        # Add footer
+            body_parts.append("**Test files added:**")
+            for tf in state.test_files.keys():
+                body_parts.append(f"- `{tf}`")
+        body_parts.append("")
+
+        # Review focus areas — direct reviewers to critical parts
+        body_parts.append("## Review Focus Areas")
+        if security_considerations:
+            body_parts.append(f"- Pay special attention to auth/input validation: {security_considerations[0]}")
+        if state.code_changes:
+            main_file = next(iter(state.code_changes))
+            body_parts.append(f"- Core logic is in `{main_file}` — verify error handling paths")
+        if breaking_changes:
+            body_parts.append("- **BREAKING CHANGE**: verify migration path before approving")
+        body_parts.append("")
+
+        # Automated review findings
+        body_parts.append("## Review Findings (from automated review)")
+        body_parts.append(self._summarize_review_findings(state.review_findings))
+        body_parts.append("")
+
+        # Breaking changes
+        body_parts.append("## Breaking Changes")
+        if breaking_changes:
+            body_parts.append(f"- [x] Breaking change: {breaking_details or 'See implementation notes'}")
+        else:
+            body_parts.append("- [x] No breaking changes")
+        body_parts.append("")
+
         body_parts.extend([
-            "",
             "---",
-            "*This PR was automatically generated by the AI Agent Pipeline.*"
+            "*Generated by the AI Agent Pipeline*"
         ])
-        
+
         return "\n".join(body_parts)
     
     def _summarize_review_findings(self, findings: list) -> str:

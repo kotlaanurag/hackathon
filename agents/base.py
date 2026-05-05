@@ -21,6 +21,8 @@ class AgentState(BaseModel):
     git_diff: str = ""
     review_findings: list = []
     test_files: Dict[str, str] = {}
+    test_results: Dict[str, Any] = {}
+    test_iteration: int = 0
     pr_url: str = ""
     status: str = "pending"
     errors: list = []

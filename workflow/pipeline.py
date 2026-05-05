@@ -20,14 +20,16 @@ class WorkflowState(TypedDict):
     issue: str
     repo_path: str
     branch_name: str
-    repo_context: Dict[str, Any]  # Added: Context from repo reader
-    file_contents: Dict[str, str]  # Added: File contents from repo
+    repo_context: Dict[str, Any]
+    file_contents: Dict[str, str]
     implementation_plan: Dict[str, Any]
     files_to_modify: list
     code_changes: Dict[str, str]
     git_diff: str
     review_findings: list
     test_files: Dict[str, str]
+    test_results: Dict[str, Any]
+    test_iteration: int
     pr_url: str
     status: str
     errors: list
@@ -135,6 +137,7 @@ class AgentPipeline:
             self._route_from_tester,
             {
                 "create_pr": "create_pr",
+                "code": "code",       # test failures → fix code and retry
                 "error": "handle_error"
             }
         )
@@ -236,23 +239,23 @@ class AgentPipeline:
         return "review"
     
     def _route_from_reviewer(self, state: WorkflowState) -> Literal["test", "code", "error"]:
-        """Route from reviewer to next step."""
+        """Route from reviewer to next step. Loop back to coder when errors are found."""
         if state.get("errors"):
             return "error"
-        
-        # Check if changes are requested
         for finding in state.get("review_findings", []):
             if finding.get("severity") == "error":
-                # For now, continue to test even with errors
-                # In production, might want to loop back to coder
-                pass
-        
+                return "code"
         return "test"
     
-    def _route_from_tester(self, state: WorkflowState) -> Literal["create_pr", "error"]:
-        """Route from tester to next step."""
+    MAX_TEST_ITERATIONS = 2
+
+    def _route_from_tester(self, state: WorkflowState) -> Literal["create_pr", "code", "error"]:
+        """Route from tester: loop back to coder on failures up to MAX_TEST_ITERATIONS."""
         if state.get("errors"):
             return "error"
+        test_status = state.get("test_results", {}).get("status", "skipped")
+        if test_status == "failed" and state.get("test_iteration", 0) <= self.MAX_TEST_ITERATIONS:
+            return "code"
         return "create_pr"
     
     def _to_agent_state(self, workflow_state: WorkflowState) -> AgentState:
@@ -261,12 +264,16 @@ class AgentPipeline:
             issue=workflow_state.get("issue", ""),
             repo_path=workflow_state.get("repo_path", self.repo_path),
             branch_name=workflow_state.get("branch_name", ""),
+            repo_context=workflow_state.get("repo_context", {}),
+            file_contents=workflow_state.get("file_contents", {}),
             implementation_plan=workflow_state.get("implementation_plan", {}),
             files_to_modify=workflow_state.get("files_to_modify", []),
             code_changes=workflow_state.get("code_changes", {}),
             git_diff=workflow_state.get("git_diff", ""),
             review_findings=workflow_state.get("review_findings", []),
             test_files=workflow_state.get("test_files", {}),
+            test_results=workflow_state.get("test_results", {}),
+            test_iteration=workflow_state.get("test_iteration", 0),
             pr_url=workflow_state.get("pr_url", ""),
             status=workflow_state.get("status", "pending"),
             errors=workflow_state.get("errors", []),
@@ -288,6 +295,8 @@ class AgentPipeline:
             "git_diff": agent_state.git_diff,
             "review_findings": agent_state.review_findings,
             "test_files": agent_state.test_files,
+            "test_results": agent_state.test_results,
+            "test_iteration": agent_state.test_iteration,
             "pr_url": agent_state.pr_url,
             "status": agent_state.status,
             "errors": agent_state.errors,
@@ -321,6 +330,8 @@ class AgentPipeline:
             "git_diff": "",
             "review_findings": [],
             "test_files": {},
+            "test_results": {},
+            "test_iteration": 0,
             "pr_url": "",
             "status": "pending",
             "errors": [],
@@ -342,6 +353,89 @@ class AgentPipeline:
             log_pipeline_end("error", error_result)
             return error_result
     
+    async def run_planning(self, issue: str) -> Dict[str, Any]:
+        """
+        Phase 1 — Orchestrator → RepoReader → Analyst.
+
+        Returns the full AgentState dict (pass it unchanged to run_execution).
+        """
+        log_pipeline_start(issue, self.repo_path)
+        state = AgentState(issue=issue, repo_path=self.repo_path, status="pending")
+
+        for agent in [self.orchestrator, self.repo_reader, self.analyst]:
+            state = await agent.execute(state)
+            if state.errors:
+                state.status = "error"
+                log_pipeline_end("error", state.model_dump())
+                return state.model_dump()
+
+        state.status = "planning_complete"
+        log_pipeline_end("planning_complete", state.model_dump())
+        return state.model_dump()
+
+    async def run_execution(self, planning_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Phase 2 — Coder → Reviewer (→ Coder retry on errors) → Tester (→ Coder retry on failures, max 2) → PRManager.
+
+        Accepts the dict returned by run_planning as input.
+        """
+        state = AgentState(**{k: v for k, v in planning_state.items() if k in AgentState.model_fields})
+
+        # ── Coder ────────────────────────────────────────────────────────────
+        state = await self.coder.execute(state)
+        if state.errors:
+            state.status = "error"
+            return state.model_dump()
+
+        # ── Reviewer — one retry if error-severity findings exist ─────────
+        state = await self.reviewer.execute(state)
+        if any(f.get("severity") == "error" for f in state.review_findings) and not state.errors:
+            print("[Pipeline] Reviewer found errors — looping back to Coder (retry 1)")
+            state = await self.coder.execute(state)
+            state = await self.reviewer.execute(state)
+
+        if state.errors:
+            state.status = "error"
+            return state.model_dump()
+
+        # ── Tester — loop back to Coder up to MAX_TEST_ITERATIONS on failure ─
+        for test_iter in range(self.MAX_TEST_ITERATIONS + 1):
+            state = await self.tester.execute(state)
+            if state.errors:
+                state.status = "error"
+                return state.model_dump()
+
+            test_status = state.test_results.get("status", "skipped")
+            if test_status != "failed" or test_iter >= self.MAX_TEST_ITERATIONS:
+                # Tests passed, were skipped/errored, or we've exhausted retries
+                if test_status == "failed":
+                    print(
+                        f"[Pipeline] Tests still failing after {self.MAX_TEST_ITERATIONS} "
+                        "retries — proceeding to PR"
+                    )
+                break
+
+            # Tests failed and retries remain — fix the code and try again
+            print(
+                f"[Pipeline] Tests FAILED (iteration {test_iter + 1}/{self.MAX_TEST_ITERATIONS}) "
+                "— looping back to Coder"
+            )
+            state = await self.coder.execute(state)
+            if state.errors:
+                state.status = "error"
+                return state.model_dump()
+            state = await self.reviewer.execute(state)
+            if state.errors:
+                state.status = "error"
+                return state.model_dump()
+
+        # ── PR Manager ───────────────────────────────────────────────────────
+        state = await self.pr_manager.execute(state)
+
+        state.status = "completed" if not state.errors else "error"
+        log_pipeline_end(state.status, state.model_dump())
+        return state.model_dump()
+
     def get_workflow_visualization(self) -> str:
         """Get a visual representation of the workflow."""
         return """

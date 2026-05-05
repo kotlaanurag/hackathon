@@ -1,7 +1,7 @@
 """Orchestrator Agent - Coordinates the entire development pipeline with LLM."""
 
 import json
-from typing import Dict, Any, Literal
+from typing import Dict, Any
 from agents.base import BaseAgent, AgentState
 from prompts import get_prompt
 from model import get_llm
@@ -70,27 +70,52 @@ class OrchestratorAgent(BaseAgent):
     async def _parse_requirements_with_llm(self, issue: str) -> Dict[str, Any]:
         """
         Use LLM to parse the issue text into structured requirements.
-        
+
         This is the core LLM-powered parsing method.
         """
-        prompt = f"""Analyze the following development request and extract key information.
+        prompt = f"""You are Alex, Senior Technical Lead operating in the Requirements & Analysis phase of the SDLC.
+
+Analyze the following development request and extract complete, structured requirements that will drive the entire pipeline.
 
 ## Request:
 {issue}
 
+## Your Analysis Tasks:
+1. Identify the true intent — what is ACTUALLY needed, not just what was literally said
+2. Classify the change type and risk level accurately
+3. Define testable acceptance criteria (not vague goals)
+4. Flag any security, breaking-change, or architectural concerns upfront
+5. Identify which SDLC phases and components will be involved
+
 ## Required Output (JSON format):
-Return a JSON object with the following structure:
 ```json
 {{
     "raw_issue": "original request text",
-    "type": "feature|bugfix|refactor|enhancement",
-    "summary": "brief summary of what needs to be done",
-    "key_requirements": ["requirement 1", "requirement 2"],
-    "target_files": ["file1.py", "file2.py"],
+    "type": "feature|bugfix|refactor|enhancement|security|performance",
+    "summary": "Precise 1-2 sentence summary of what needs to be built and why",
+    "key_requirements": [
+        "Specific, verifiable requirement 1",
+        "Specific, verifiable requirement 2"
+    ],
+    "acceptance_criteria": [
+        "Given X, when Y, then Z — testable criterion 1",
+        "Given X, when Y, then Z — testable criterion 2"
+    ],
+    "technical_considerations": [
+        "Architecture or implementation constraint 1",
+        "Relevant existing pattern or component to reuse"
+    ],
+    "target_files": ["likely_file1.py", "likely_file2.py"],
+    "affected_components": ["auth", "api", "models", "database"],
+    "sdlc_phases": ["design", "implementation", "review", "testing", "delivery"],
     "priority": "low|normal|high|critical",
+    "risk_level": "low|medium|high|critical",
     "estimated_complexity": "low|medium|high",
-    "technologies": ["python", "fastapi", etc.],
-    "acceptance_criteria": ["criteria 1", "criteria 2"]
+    "technologies": ["python", "fastapi"],
+    "breaking_changes": false,
+    "breaking_change_details": "null or description of what breaks and migration path",
+    "requires_security_review": false,
+    "security_concerns": ["list any auth, injection, or data-exposure concerns, or empty array"]
 }}
 ```
 
@@ -184,20 +209,3 @@ Provide ONLY the JSON object, no additional text."""
         else:
             return "high"
     
-    def decide_next_step(self, state: AgentState) -> Literal["analyze", "code", "review", "test", "create_pr", "complete", "error"]:
-        """Decide the next step in the workflow based on current state."""
-        if state.errors:
-            return "error"
-        
-        if not state.implementation_plan:
-            return "analyze"
-        elif not state.code_changes:
-            return "code"
-        elif not state.review_findings:
-            return "review"
-        elif not state.test_files:
-            return "test"
-        elif not state.pr_url:
-            return "create_pr"
-        else:
-            return "complete"
