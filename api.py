@@ -18,6 +18,17 @@ from workflow.pipeline import AgentPipeline
 
 load_dotenv()
 
+# ── Required environment variables ──────────────────────────────────────────
+_REQUIRED_ENV = [
+    "GITHUB_TOKEN",
+    "GITHUB_REPO_OWNER",
+    "GITHUB_REPO_NAME",
+]
+
+_OPTIONAL_ENV_DEFAULTS = {
+    "GITHUB_BASE_BRANCH": "main",
+}
+
 app = FastAPI(
     title="Multi-Agent Development Pipeline",
     description=(
@@ -39,6 +50,34 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def validate_env() -> None:
+    """Fail fast on startup if required environment variables are missing.
+
+    Without this, the pipeline runs Orchestrator and RepoReader successfully
+    before discovering that GITHUB_TOKEN is missing when PRManager runs —
+    wasting minutes of LLM calls.
+    """
+    missing = [v for v in _REQUIRED_ENV if not os.getenv(v)]
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {missing}. "
+            "Check your .env file before starting the server."
+        )
+
+
+# ── Internal-field filter ────────────────────────────────────────────────────
+# These fields are used as an inter-agent bus and must never be returned to
+# the API caller: they carry raw file contents (potentially MBs of text) and
+# the full message log that is only useful for internal debugging.
+_INTERNAL_FIELDS = {"messages", "file_contents"}
+
+
+def _public_response(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip internal pipeline fields from a state dict before returning it."""
+    return {k: v for k, v in state.items() if k not in _INTERNAL_FIELDS}
+
+
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
@@ -57,25 +96,13 @@ class PlanRequest(BaseModel):
 
 class ExecuteRequest(BaseModel):
     """
-    The full planning state returned by POST /plan.
-    Copy the entire response body and post it here unchanged.
+    Pass the response from POST /plan here — optionally edit implementation_plan before submitting.
     """
     issue: str = ""
     repo_path: str = ""
-    branch_name: str = ""
     repo_context: Dict[str, Any] = {}
-    file_contents: Dict[str, str] = {}
     implementation_plan: Dict[str, Any] = {}
     files_to_modify: List[str] = []
-    code_changes: Dict[str, str] = {}
-    git_diff: str = ""
-    review_findings: List[Any] = []
-    test_files: Dict[str, str] = {}
-    pr_url: str = ""
-    status: str = "pending"
-    errors: List[str] = []
-    current_agent: str = ""
-    messages: List[Any] = []
 
 
 # ---------------------------------------------------------------------------
@@ -90,19 +117,32 @@ async def plan(request: PlanRequest) -> Dict[str, Any]:
     Agents executed in order:
     1. **Orchestrator** — parses the issue, detects type and complexity
     2. **RepoReader** — clones the GitHub repo and indexes file contents
-    3. **Analyst** — uses the repo context to produce a detailed implementation plan
+    3. **Analyst** — produces a detailed implementation plan (LLM picks the files)
 
-    Returns the full pipeline state. Pass this response body directly to
-    `POST /execute` to continue.
+    Returns the plan for user review. Edit `implementation_plan` or `files_to_modify`
+    as needed, then pass the full response to `POST /execute`.
     """
     repo_path = request.repo_path or os.getcwd()
     pipeline = AgentPipeline(repo_path=repo_path)
 
     try:
-        result = await pipeline.run_planning(request.issue)
-        return result
+        full_state = await pipeline.run_planning(request.issue)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+    # Return only what the user needs to review — strip internal blobs
+    return {
+        "issue": full_state.get("issue", request.issue),
+        "repo_path": full_state.get("repo_path", repo_path),
+        "repo_context": {
+            k: v for k, v in full_state.get("repo_context", {}).items()
+            if k != "_orchestrator_metadata"
+        },
+        "implementation_plan": full_state.get("implementation_plan", {}),
+        "files_to_modify": full_state.get("files_to_modify", []),
+        "status": full_state.get("status", ""),
+        "errors": full_state.get("errors", []),
+    }
 
 
 @app.post("/execute", summary="Phase 2 — Execute")
@@ -116,14 +156,14 @@ async def execute(request: ExecuteRequest) -> Dict[str, Any]:
     3. **Tester** — generates and commits pytest test files
     4. **PRManager** — pushes the branch and opens a GitHub Pull Request
 
-    Input: the response body from `POST /plan`.
+    Input: the response from `POST /plan` (optionally with `implementation_plan` edited).
     Output: PR URL, test results, review findings, and final status.
     """
     pipeline = AgentPipeline(repo_path=request.repo_path or os.getcwd())
 
     try:
         result = await pipeline.run_execution(request.model_dump())
-        return result
+        return _public_response(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

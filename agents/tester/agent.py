@@ -44,7 +44,7 @@ class TesterAgent(BaseAgent):
         try:
             test_files = await self._generate_tests_with_llm(
                 state.code_changes,
-                state.issue,
+                self._sanitize_input(state.issue),
                 state.implementation_plan
             )
             state.test_files = test_files
@@ -56,7 +56,7 @@ class TesterAgent(BaseAgent):
             self._commit_test_files(state.repo_path)
             self.log("Committed test files")
 
-            test_results = self._run_tests(state.repo_path)
+            test_results = self._run_tests(state.repo_path, list(test_files.keys()))
             test_count = self._count_tests(test_files)
             self.log("Ran tests", {"results": test_results})
 
@@ -413,31 +413,42 @@ class TesterAgent(BaseAgent):
             self.log("Git not found")
             raise GitNotFoundError("Git is not installed or not found in PATH.")
 
-    def _run_tests(self, repo_path: str) -> Dict[str, Any]:
-        """Run the test suite and return results."""
+    def _run_tests(self, repo_path: str, test_file_paths: List[str]) -> Dict[str, Any]:
+        """Run only the generated test files — not the entire test suite.
+
+        Running the full suite risks failing on pre-existing broken tests that
+        are unrelated to the current change, which would incorrectly trigger a
+        Coder retry loop.
+        """
         if not repo_path:
             return {"status": "skipped", "reason": "No repo path provided"}
 
+        if not test_file_paths:
+            return {"status": "skipped", "reason": "No test files generated"}
+
         try:
             result = subprocess.run(
-                ["python", "-m", "pytest", "tests/", "-v", "--tb=short"],
+                ["python", "-m", "pytest"] + test_file_paths + ["-v", "--tb=short"],
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
-                timeout=120
+                timeout=120,
             )
+            # Capture full output — truncation here was hiding failure details from the Coder retry
+            stdout = result.stdout
+            stderr = result.stderr
             return {
                 "status": "passed" if result.returncode == 0 else "failed",
                 "return_code": result.returncode,
-                "output": result.stdout[:2000],
-                "errors": result.stderr[:1000] if result.stderr else None
+                "output": stdout[:4000],
+                "errors": stderr[:2000] if stderr else None,
             }
         except subprocess.TimeoutExpired:
-            return {"status": "timeout", "reason": "Tests took too long"}
+            return {"status": "timeout", "reason": "Tests took longer than 120 s"}
         except FileNotFoundError:
             return {"status": "skipped", "reason": "pytest not installed"}
-        except Exception as e:
-            return {"status": "error", "reason": str(e)}
+        except Exception as exc:
+            return {"status": "error", "reason": str(exc)}
 
     def _count_tests(self, test_files: Dict[str, str]) -> int:
         """Count total test methods across all generated test files."""

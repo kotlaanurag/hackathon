@@ -1,5 +1,6 @@
 """Coder Agent - Implements code changes using LangGraph with LLM-powered tools."""
 
+import ast
 import os
 import subprocess
 import re
@@ -55,17 +56,22 @@ class CoderAgent(BaseAgent):
             else:
                 self.log(f"Reusing existing branch: {state.branch_name}")
             
-            # Step 2: Get repo context and file contents
-            repo_context = self._get_repo_context_from_messages(state)
-            file_contents = self._get_file_contents_from_messages(state)
-            
+            # Step 2: Use state fields directly (RepoReader writes here); fall back to disk
+            repo_context = state.repo_context
+            file_contents = state.file_contents or self._read_files_from_disk(
+                state.repo_path, state.files_to_modify
+            )
+
+            safe_issue = self._sanitize_input(state.issue)
+
             # Step 3: Generate code using LLM for each file
             code_changes = await self._generate_code_with_llm(
-                state.issue,
+                safe_issue,
                 state.implementation_plan,
                 state.files_to_modify,
                 repo_context,
-                file_contents
+                file_contents,
+                state.last_test_failure,
             )
             
             state.code_changes = code_changes
@@ -101,20 +107,29 @@ class CoderAgent(BaseAgent):
             state.errors.append(str(e))
             return state
     
-    def _get_repo_context_from_messages(self, state: AgentState) -> Dict[str, Any]:
-        """Get repo context from RepoReader messages."""
-        for msg in state.messages:
-            if msg.get("agent") == "RepoReader" and msg.get("action") == "repo_loaded":
-                return msg.get("data", {}).get("context_summary", {})
-        return {}
-    
-    def _get_file_contents_from_messages(self, state: AgentState) -> Dict[str, str]:
-        """Get file contents from RepoReader messages."""
-        for msg in state.messages:
-            if msg.get("agent") == "RepoReader" and msg.get("action") == "repo_loaded":
-                return msg.get("data", {}).get("file_contents", {})
-        return {}
-    
+    def _validate_python_syntax(self, code: str, file_path: str) -> Optional[str]:
+        """Return a SyntaxError description if code is invalid Python, else None."""
+        try:
+            ast.parse(code)
+            return None
+        except SyntaxError as exc:
+            return f"SyntaxError in {file_path} at line {exc.lineno}: {exc.msg}"
+
+    def _read_files_from_disk(self, repo_path: str, file_paths: List[str]) -> Dict[str, str]:
+        """Read existing file contents from disk (used when RepoReader cache is unavailable)."""
+        contents: Dict[str, str] = {}
+        if not repo_path:
+            return contents
+        for rel_path in file_paths:
+            full_path = os.path.join(repo_path, rel_path)
+            try:
+                if os.path.isfile(full_path):
+                    with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                        contents[rel_path] = fh.read()
+            except OSError:
+                pass
+        return contents
+
     def _create_branch(self, repo_path: str, issue: str) -> str:
         """Create a new git branch for the changes."""
         # Generate branch name from issue
@@ -186,51 +201,66 @@ class CoderAgent(BaseAgent):
         implementation_plan: Dict[str, Any],
         files_to_modify: List[str],
         repo_context: Dict[str, Any],
-        existing_file_contents: Dict[str, str]
+        existing_file_contents: Dict[str, str],
+        last_test_failure: str = "",
     ) -> Dict[str, str]:
-        """
-        Use LLM to generate code for each file based on the implementation plan.
-        
-        This is the core LLM-powered code generation method.
-        """
-        code_changes = {}
-        
+        """Generate code for each file; validates Python syntax and retries once on failure."""
+        code_changes: Dict[str, str] = {}
+
         for file_path in files_to_modify:
             self.log(f"Generating code for: {file_path}")
-            
-            # Get existing file content if available
             existing_content = existing_file_contents.get(file_path, "")
-            
-            # Build the prompt for code generation
+
+            # Include already-generated sibling files so the LLM can match imports/signatures
+            already_generated = {k: v for k, v in code_changes.items() if k != file_path}
+
             prompt = self._build_code_generation_prompt(
                 file_path=file_path,
                 issue=issue,
                 implementation_plan=implementation_plan,
                 repo_context=repo_context,
-                existing_content=existing_content
+                existing_content=existing_content,
+                last_test_failure=last_test_failure,
+                already_generated=already_generated,
             )
-            
-            # Call LLM to generate code
+
             try:
                 generated_code = await self.llm.generate(
                     prompt=prompt,
                     system_prompt=self.prompt,
-                    temperature=0.3  # Lower temperature for more consistent code
+                    temperature=0.3,
                 )
-                
-                # Extract code from response (handle markdown code blocks)
                 clean_code = self._extract_code_from_response(generated_code, file_path)
+
+                # ── Syntax validation (Python only) ───────────────────────────
+                if file_path.endswith(".py"):
+                    syntax_error = self._validate_python_syntax(clean_code, file_path)
+                    if syntax_error:
+                        self.log(f"Syntax error on first attempt — retrying: {syntax_error}")
+                        retry_prompt = (
+                            f"{prompt}\n\n"
+                            f"## PREVIOUS ATTEMPT FAILED WITH SYNTAX ERROR\n"
+                            f"{syntax_error}\n"
+                            f"Fix the error and return the complete corrected file."
+                        )
+                        generated_code = await self.llm.generate(
+                            prompt=retry_prompt,
+                            system_prompt=self.prompt,
+                            temperature=0.2,
+                        )
+                        clean_code = self._extract_code_from_response(generated_code, file_path)
+                        syntax_error = self._validate_python_syntax(clean_code, file_path)
+                        if syntax_error:
+                            self.log(f"Syntax still invalid after retry — using placeholder: {syntax_error}")
+                            clean_code = self._create_placeholder_file(file_path, issue)
+
                 code_changes[file_path] = clean_code
-                
-                self.log(f"Successfully generated code for {file_path}", {
-                    "code_length": len(clean_code)
-                })
-                
-            except Exception as e:
-                self.log(f"LLM code generation failed for {file_path}: {e}")
-                # Fallback: create a placeholder file
+                self.log(f"Generated {file_path}", {"bytes": len(clean_code)})
+
+            except Exception as exc:
+                self.log(f"LLM generation failed for {file_path}: {exc}")
                 code_changes[file_path] = self._create_placeholder_file(file_path, issue)
-        
+
         return code_changes
     
     def _build_code_generation_prompt(
@@ -239,17 +269,17 @@ class CoderAgent(BaseAgent):
         issue: str,
         implementation_plan: Dict[str, Any],
         repo_context: Dict[str, Any],
-        existing_content: str
+        existing_content: str,
+        last_test_failure: str = "",
+        already_generated: Optional[Dict[str, str]] = None,
     ) -> str:
-        """Build a comprehensive SDLC-aware prompt for production-quality code generation."""
-
+        """Build a prompt for production-quality code generation."""
         plan_summary = implementation_plan.get("summary", "")
         design_approach = implementation_plan.get("design_approach", "")
         steps = implementation_plan.get("steps", [])
         security_considerations = implementation_plan.get("security_considerations", [])
         error_handling_strategy = implementation_plan.get("error_handling_strategy", "")
 
-        # Find the file-specific plan entry
         file_plan = ""
         for f in implementation_plan.get("files_to_create", []):
             if isinstance(f, dict) and f.get("path") == file_path:
@@ -264,7 +294,7 @@ class CoderAgent(BaseAgent):
 
         prompt_parts = [
             "You are Jordan, Senior Software Engineer in the Implementation phase of the SDLC.",
-            "Write production-ready code as if a tired senior engineer will maintain it at 2 AM during an incident.",
+            "Write production-ready code as if a tired senior engineer will maintain it at 2 AM.",
             "Make it obvious, safe, and correct. Follow the plan precisely — no gold-plating.",
             "",
             f"## File: {file_path}",
@@ -284,9 +314,7 @@ class CoderAgent(BaseAgent):
             prompt_parts.extend(["", "## Implementation Steps (follow in order):"])
             for i, step in enumerate(steps, 1):
                 if isinstance(step, dict):
-                    action = step.get("action", "")
-                    desc = step.get("description", "")
-                    step_text = f"{action}: {desc}".strip(": ")
+                    step_text = f"{step.get('action', '')}: {step.get('description', '')}".strip(": ")
                     prompt_parts.append(f"{i}. {step_text}")
                 else:
                     prompt_parts.append(f"{i}. {step}")
@@ -310,6 +338,31 @@ class CoderAgent(BaseAgent):
                 "",
             ])
 
+        # Cross-file consistency: show already-generated siblings so imports stay aligned
+        if already_generated:
+            prompt_parts.append("## Other Files Already Generated (match imports and signatures):")
+            for sibling_path, sibling_code in list(already_generated.items())[:2]:
+                prompt_parts.extend([
+                    f"### {sibling_path}:",
+                    "```",
+                    sibling_code[:800],
+                    *( ["... (truncated)"] if len(sibling_code) > 800 else [] ),
+                    "```",
+                ])
+            prompt_parts.append("")
+
+        # Feed test failure details so the Coder knows exactly what broke
+        if last_test_failure:
+            prompt_parts.extend([
+                "## PREVIOUS TEST RUN FAILED — FIX THESE FAILURES:",
+                "```",
+                last_test_failure[:3000],
+                *( ["... (truncated)"] if len(last_test_failure) > 3000 else [] ),
+                "```",
+                "Your code must make these tests pass. Do not change the tests.",
+                "",
+            ])
+
         if security_considerations:
             prompt_parts.extend([
                 "## Security Requirements (non-negotiable):",
@@ -318,31 +371,12 @@ class CoderAgent(BaseAgent):
             ])
 
         if error_handling_strategy:
-            prompt_parts.extend([
-                f"## Error Handling Strategy: {error_handling_strategy}",
-                "",
-            ])
+            prompt_parts.extend([f"## Error Handling Strategy: {error_handling_strategy}", ""])
 
         prompt_parts.extend([
             "## Mandatory Code Standards:",
-            "SECURITY (non-negotiable):",
-            "  - NEVER hardcode passwords, API keys, tokens — use os.getenv()",
-            "  - Hash passwords with bcrypt or argon2id — never MD5, SHA1, or plaintext",
-            "  - Use parameterised queries for ALL database operations — no string-concatenated SQL",
-            "  - Validate and sanitise ALL user inputs before any operation",
-            "  - Add auth/permission checks before every data access operation",
-            "",
-            "CODE QUALITY:",
-            "  - Type hints on ALL function signatures (parameters AND return type)",
-            "  - Docstrings on all public classes and methods (Google style)",
-            "  - Catch specific exception types — never bare `except:`",
-            "  - Log errors with context before re-raising: include user_id, request_id, file path",
-            "  - Use f-strings for formatting; avoid % and .format()",
-            "  - Prefer dataclasses or Pydantic models over plain dicts for structured data",
-            "",
-            "OBSERVABILITY:",
-            "  - Log at INFO for business events, ERROR for failures, DEBUG for dev details",
-            "  - Include contextual info in every log line (user_id, file, operation)",
+            "SECURITY: never hardcode secrets; bcrypt/argon2 for passwords; parameterised SQL; validate all inputs.",
+            "QUALITY: type hints on all signatures; specific exception types; structured logging with context.",
             "",
             "## Output:",
             "Provide ONLY the complete file code. No explanations. No markdown fencing.",

@@ -11,37 +11,25 @@ PROMPTS_DIR = Path(__file__).parent
 
 def load_prompt(agent_name: str) -> str:
     """
-    Load a prompt from a text file for the specified agent.
-    
-    Args:
-        agent_name: Name of the agent (e.g., 'orchestrator', 'analyst', 'coder')
-    
-    Returns:
-        The prompt text content
-    
+    Load a prompt for the specified agent.
+    Prefers <agent>.md over <agent>.txt so markdown files take precedence.
+
     Raises:
-        FileNotFoundError: If the prompt file doesn't exist
+        FileNotFoundError: if neither file exists.
     """
-    prompt_file = PROMPTS_DIR / f"{agent_name.lower()}.txt"
-    
-    if not prompt_file.exists():
-        raise FileNotFoundError(f"Prompt file not found: {prompt_file}")
-    
-    with open(prompt_file, 'r', encoding='utf-8') as f:
-        return f.read()
+    name = agent_name.lower()
+    for ext in (".md", ".txt"):
+        path = PROMPTS_DIR / f"{name}{ext}"
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+    raise FileNotFoundError(
+        f"No prompt file found for agent '{agent_name}' in {PROMPTS_DIR}"
+    )
 
 
 def get_prompt(agent_name: str, default: Optional[str] = None) -> str:
-    """
-    Get a prompt for the specified agent, with optional default fallback.
-    
-    Args:
-        agent_name: Name of the agent
-        default: Default prompt to return if file not found
-    
-    Returns:
-        The prompt text content or default
-    """
+    """Return the prompt for agent_name, or default if no file exists."""
     try:
         return load_prompt(agent_name)
     except FileNotFoundError:
@@ -51,19 +39,14 @@ def get_prompt(agent_name: str, default: Optional[str] = None) -> str:
 
 
 def get_all_prompts() -> dict:
-    """
-    Load all available prompts from the prompts directory.
-    
-    Returns:
-        Dictionary mapping agent names to their prompts
-    """
-    prompts = {}
-    
+    """Load all available prompts (md preferred over txt)."""
+    prompts: dict = {}
     if not PROMPTS_DIR.exists():
         return prompts
-    
-    for prompt_file in PROMPTS_DIR.glob("*.txt"):
-        agent_name = prompt_file.stem
-        prompts[agent_name] = load_prompt(agent_name)
-    
+    seen: set = set()
+    for ext in ("*.md", "*.txt"):
+        for path in PROMPTS_DIR.glob(ext):
+            if path.stem not in seen and path.stem != "__init__":
+                prompts[path.stem] = load_prompt(path.stem)
+                seen.add(path.stem)
     return prompts

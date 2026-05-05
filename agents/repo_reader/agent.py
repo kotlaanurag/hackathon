@@ -110,7 +110,11 @@ class RepoReaderAgent(BaseAgent):
             # Step 5: Create repo context summary
             repo_context = self._create_repo_context(repo_structure, file_contents)
             
-            # Step 6: Update state with repo information
+            # Step 6: Write directly to state fields — do NOT embed file_contents
+            # inside the message blob, as that would carry megabytes through every
+            # downstream agent's state serialization.
+            state.file_contents = file_contents
+            state.repo_context = repo_context
             state.current_agent = self.name
             state.status = "repo_loaded"
             state.messages.append({
@@ -121,12 +125,12 @@ class RepoReaderAgent(BaseAgent):
                     "repo_name": self.repo_name,
                     "repo_path": repo_path,
                     "branch": self.base_branch,
-                    "structure": repo_structure,
-                    "file_contents": file_contents,
-                    "context_summary": repo_context
+                    "total_files": repo_structure["file_count"],
+                    "main_language": repo_context.get("main_language"),
+                    "project_type": repo_context.get("project_type"),
                 }
             })
-            
+
             self.log("Repository loaded successfully", {
                 "files_indexed": len(file_contents),
                 "repo_path": repo_path
@@ -436,16 +440,9 @@ class RepoReaderAgent(BaseAgent):
         return "\n".join(summary_lines)
     
     def get_file_content(self, state: AgentState, file_path: str) -> Optional[str]:
-        """Get content of a specific file from the loaded repo."""
-        for msg in state.messages:
-            if msg.get("agent") == self.name and msg.get("action") == "repo_loaded":
-                file_contents = msg.get("data", {}).get("file_contents", {})
-                return file_contents.get(file_path)
-        return None
-    
-    def get_repo_context(self, state: AgentState) -> Optional[Dict[str, Any]]:
+        """Get content of a specific file from state."""
+        return state.file_contents.get(file_path)
+
+    def get_repo_context(self, state: AgentState) -> Dict[str, Any]:
         """Get the repository context from state."""
-        for msg in state.messages:
-            if msg.get("agent") == self.name and msg.get("action") == "repo_loaded":
-                return msg.get("data", {}).get("context_summary")
-        return None
+        return state.repo_context

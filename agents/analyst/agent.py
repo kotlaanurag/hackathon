@@ -3,7 +3,7 @@
 import os
 import re
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from agents.base import BaseAgent, AgentState
 from prompts import get_prompt
 from model import get_llm
@@ -43,67 +43,60 @@ class AnalystAgent(BaseAgent):
         self.log("Analyzing repository with LLM...", {"repo_path": state.repo_path})
 
         try:
-            repo_context = self._get_repo_context_from_messages(state)
-            file_contents = self._get_file_contents_from_messages(state)
-
-            if repo_context:
-                self.log("Using repo context from RepoReader", {
-                    "main_language": repo_context.get("main_language"),
-                    "project_type": repo_context.get("project_type"),
-                    "total_files": repo_context.get("total_files")
-                })
+            # Use state fields directly — RepoReader writes here, no message-scanning needed
+            repo_context = state.repo_context
+            file_contents = state.file_contents
 
             if file_contents:
                 repo_structure = {
                     "files": list(file_contents.keys()),
                     "file_count": len(file_contents)
                 }
-                self.log("Using file contents from RepoReader", {"file_count": len(file_contents)})
+                self.log("Using file list from RepoReader", {"file_count": len(file_contents)})
             else:
                 repo_structure = self._read_repo_structure(state.repo_path)
                 self.log("Repository structure read from disk", {
                     "file_count": repo_structure.get("file_count", 0)
                 })
 
-            relevant_files = self._identify_relevant_files_with_context(
-                repo_structure,
-                state.issue,
-                file_contents
-            )
-            self.log("Relevant files identified", {
-                "count": len(relevant_files),
-                "files": relevant_files[:5]
-            })
+            safe_issue = self._sanitize_input(state.issue)
 
+            # Let the LLM decide which files to create/modify — no regex pre-filtering
             implementation_plan = await self._create_implementation_plan_with_llm(
-                state.issue,
+                safe_issue,
                 repo_structure,
-                relevant_files,
                 repo_context,
                 file_contents
             )
 
             state.implementation_plan = implementation_plan
 
-            files_to_create = implementation_plan.get("files_to_create", [])
-            files_to_modify = implementation_plan.get("files_to_modify", relevant_files)
-            all_files = list(set(files_to_create + files_to_modify))
-            state.files_to_modify = all_files if all_files else relevant_files
+            # Extract paths from LLM-chosen file lists (entries may be dicts or plain strings)
+            def _paths(entries: list) -> list:
+                return [f["path"] if isinstance(f, dict) else f for f in entries]
+
+            files_to_create = _paths(implementation_plan.get("files_to_create", []))
+            files_to_modify = _paths(implementation_plan.get("files_to_modify", []))
+            # Preserve order, deduplicate
+            seen: set = set()
+            combined = []
+            for p in files_to_create + files_to_modify:
+                if p not in seen:
+                    seen.add(p)
+                    combined.append(p)
+            state.files_to_modify = combined
 
             state.current_agent = self.name
             state.messages.append({
                 "agent": self.name,
                 "action": "created_implementation_plan",
                 "data": {
-                    "repo_structure": repo_structure,
-                    "relevant_files": relevant_files,
-                    "suggested_new_files": files_to_create,
                     "plan": implementation_plan,
                     "repo_context": repo_context
                 }
             })
 
-            self.log(f"Implementation plan created with {len(state.files_to_modify)} files", {
+            self.log(f"LLM selected {len(state.files_to_modify)} files", {
                 "files": state.files_to_modify
             })
 
@@ -120,7 +113,6 @@ class AnalystAgent(BaseAgent):
         self,
         issue: str,
         repo_structure: Dict,
-        relevant_files: List[str],
         repo_context: Dict,
         file_contents: Dict
     ) -> Dict[str, Any]:
@@ -128,7 +120,6 @@ class AnalystAgent(BaseAgent):
         prompt = self._build_planning_prompt(
             issue=issue,
             repo_structure=repo_structure,
-            relevant_files=relevant_files,
             repo_context=repo_context,
             file_contents=file_contents
         )
@@ -146,26 +137,28 @@ class AnalystAgent(BaseAgent):
             return plan
 
         except Exception as e:
-            self.log(f"LLM planning failed, using fallback: {e}")
-            return self._create_fallback_plan(issue, relevant_files, repo_context)
+            self.log(f"LLM planning failed, using fallback: {e}", {"error": str(e)})
+            state_errors = [f"LLM planning failed: {e}"]
+            return self._create_fallback_plan(issue, repo_context, state_errors)
 
     def _build_planning_prompt(
         self,
         issue: str,
         repo_structure: Dict,
-        relevant_files: List[str],
         repo_context: Dict,
         file_contents: Dict
     ) -> str:
         """Build a comprehensive SDLC-aware prompt for implementation planning."""
 
-        # Extract orchestrator metadata if available (passed through repo_context)
         orchestrator_data = repo_context.get("_orchestrator_metadata", {})
         acceptance_criteria = orchestrator_data.get("acceptance_criteria", [])
         risk_level = orchestrator_data.get("risk_level", "medium")
         requires_security = orchestrator_data.get("requires_security_review", False)
         tech_considerations = orchestrator_data.get("technical_considerations", [])
         breaking_changes = orchestrator_data.get("breaking_changes", False)
+
+        all_files = repo_structure.get("files", [])
+        code_files = [f for f in all_files if os.path.splitext(f)[1] in self.code_extensions]
 
         prompt_parts = [
             "You are Sam, Senior Solutions Architect operating in the Design & Planning phase of the SDLC.",
@@ -180,7 +173,7 @@ class AnalystAgent(BaseAgent):
             f"- Main Language: {repo_context.get('main_language', 'Unknown')}",
             f"- Project Type: {repo_context.get('project_type', 'Unknown')}",
             f"- Frameworks: {', '.join(repo_context.get('frameworks', [])) or 'Unknown'}",
-            f"- Total Files: {len(repo_structure.get('files', []))}",
+            f"- Total Files: {len(all_files)} ({len(code_files)} code files)",
             f"- Risk Level: {risk_level}",
             f"- Requires Security Review: {requires_security}",
             f"- Breaking Changes: {breaking_changes}",
@@ -199,23 +192,31 @@ class AnalystAgent(BaseAgent):
                 prompt_parts.append(f"- {tc}")
             prompt_parts.append("")
 
-        if relevant_files:
-            prompt_parts.append("## Relevant Files (identified by RepoReader):")
-            for f in relevant_files[:10]:
+        if code_files:
+            prompt_parts.append("## All Code Files in Repository (YOU decide which to create/modify):")
+            for f in code_files[:50]:
                 prompt_parts.append(f"- {f}")
+            if len(code_files) > 50:
+                prompt_parts.append(f"... and {len(code_files) - 50} more")
             prompt_parts.append("")
 
         if file_contents:
-            prompt_parts.append("## Existing Code (for context — match these patterns):")
-            for file_path in relevant_files[:5]:
-                content = file_contents.get(file_path, "")
-                if content and not content.startswith("["):
-                    prompt_parts.append(f"\n### {file_path}:")
-                    prompt_parts.append("```")
-                    prompt_parts.append(content[:1500])
-                    if len(content) > 1500:
-                        prompt_parts.append("... (truncated)")
-                    prompt_parts.append("```")
+            # Show a sample of actual file contents so the LLM can match style/patterns
+            shown = 0
+            prompt_parts.append("## Sample File Contents (match these patterns):")
+            for file_path, content in file_contents.items():
+                if shown >= 4:
+                    break
+                ext = os.path.splitext(file_path)[1]
+                if ext not in self.code_extensions or not content or content.startswith("["):
+                    continue
+                prompt_parts.append(f"\n### {file_path}:")
+                prompt_parts.append("```")
+                prompt_parts.append(content[:1200])
+                if len(content) > 1200:
+                    prompt_parts.append("... (truncated)")
+                prompt_parts.append("```")
+                shown += 1
             prompt_parts.append("")
 
         prompt_parts.extend([
@@ -309,25 +310,24 @@ class AnalystAgent(BaseAgent):
     def _create_fallback_plan(
         self,
         issue: str,
-        relevant_files: List[str],
-        repo_context: Dict
+        repo_context: Dict,
+        errors: List[str]
     ) -> Dict[str, Any]:
-        """Create a basic fallback plan when LLM fails."""
+        """Create a minimal fallback plan when LLM fails — signals to the user that manual review is needed."""
         return {
-            "summary": f"Implementation plan for: {issue[:100]}",
+            "summary": f"[FALLBACK — LLM planning failed] {issue[:150]}",
             "action_type": self._detect_issue_type(issue),
             "steps": [
-                {"step": 1, "action": "Analyze existing code", "files": relevant_files[:5]},
+                {"step": 1, "action": "Review the issue and identify files to change"},
                 {"step": 2, "action": "Implement requested changes"},
-                {"step": 3, "action": "Add error handling"},
-                {"step": 4, "action": "Write tests"},
-                {"step": 5, "action": "Add documentation"}
+                {"step": 3, "action": "Add error handling and tests"},
             ],
-            "files_to_create": self._suggest_new_files(issue),
-            "files_to_modify": relevant_files,
+            "files_to_create": [],
+            "files_to_modify": [],
             "dependencies": [],
             "estimated_complexity": "medium",
-            "risks": [],
+            "risks": ["LLM planning failed — plan was auto-generated and requires manual review"],
+            "fallback_errors": errors,
             "testing_requirements": "Add appropriate unit tests"
         }
 
@@ -341,109 +341,6 @@ class AnalystAgent(BaseAgent):
         elif any(word in issue_lower for word in ["refactor", "improve", "optimize"]):
             return "refactor"
         return "enhancement"
-
-    def _suggest_new_files(self, issue: str) -> List[str]:
-        """Suggest new files that might need to be created."""
-        suggestions = []
-        issue_lower = issue.lower()
-
-        if "login" in issue_lower or "auth" in issue_lower:
-            suggestions.extend(["auth.py", "auth_utils.py"])
-        if "api" in issue_lower or "endpoint" in issue_lower:
-            suggestions.extend(["routes.py", "handlers.py"])
-        if "test" in issue_lower:
-            suggestions.append("tests/test_feature.py")
-        if "model" in issue_lower or "database" in issue_lower:
-            suggestions.append("models.py")
-        if "config" in issue_lower:
-            suggestions.append("config.py")
-
-        return suggestions
-
-    def _get_repo_context_from_messages(self, state: AgentState) -> Dict[str, Any]:
-        """Get repo context from RepoReader messages."""
-        for msg in state.messages:
-            if msg.get("agent") == "RepoReader" and msg.get("action") == "repo_loaded":
-                return msg.get("data", {}).get("context_summary", {})
-        return {}
-
-    def _get_file_contents_from_messages(self, state: AgentState) -> Dict[str, str]:
-        """Get file contents from RepoReader messages."""
-        for msg in state.messages:
-            if msg.get("agent") == "RepoReader" and msg.get("action") == "repo_loaded":
-                return msg.get("data", {}).get("file_contents", {})
-        return {}
-
-    def _identify_relevant_files_with_context(
-        self,
-        repo_structure: Dict,
-        issue: str,
-        file_contents: Dict
-    ) -> List[str]:
-        """Identify files relevant to the issue using both structure and content."""
-        relevant = []
-        issue_lower = issue.lower()
-        keywords = self._extract_keywords(issue_lower)
-
-        # Prioritise any file explicitly named in the issue
-        target_file = self._extract_target_file(issue)
-        if target_file:
-            for file_path in repo_structure.get("files", []):
-                if file_path.lower().endswith(target_file.lower()):
-                    relevant.append(file_path)
-                    self.log(f"Target file identified from issue: {file_path}")
-                    break
-            if not relevant:
-                relevant.append(target_file)
-                self.log(f"Target file not in repo, will create: {target_file}")
-
-        # Match file names against keywords
-        for file_path in repo_structure.get("files", []):
-            if file_path in relevant:
-                continue
-            ext = os.path.splitext(file_path)[1]
-            if ext in self.code_extensions:
-                if any(kw in file_path.lower() for kw in keywords):
-                    relevant.append(file_path)
-
-        # Search file contents for keyword matches
-        if file_contents:
-            for file_path, content in file_contents.items():
-                if file_path in relevant or not content or content.startswith("["):
-                    continue
-                content_lower = content.lower()
-                for keyword in keywords:
-                    if keyword in content_lower:
-                        relevant.append(file_path)
-                        break
-
-        # Fall back to main entry points if nothing found
-        if not relevant:
-            for file_path in repo_structure.get("files", []):
-                if any(entry in file_path.lower() for entry in ['main', 'app', 'index', '__init__']):
-                    relevant.append(file_path)
-
-        return relevant[:15]
-
-    def _extract_target_file(self, issue: str) -> Optional[str]:
-        """Extract a specific file name explicitly mentioned in the issue."""
-        patterns = [
-            r'in\s+(\w+\.py)',
-            r'to\s+(\w+\.py)',
-            r'file\s+(\w+\.py)',
-            r'(\w+\.py)\s+file',
-            r'modify\s+(\w+\.py)',
-            r'update\s+(\w+\.py)',
-            r'edit\s+(\w+\.py)',
-            r'change\s+(\w+\.py)',
-            r'create\s+(\w+\.py)',
-            r'add.*?(\w+\.py)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, issue.lower())
-            if match:
-                return match.group(1)
-        return None
 
     def _read_repo_structure(self, repo_path: str) -> Dict[str, Any]:
         """Read repository structure from disk (fallback when RepoReader hasn't run)."""
@@ -471,19 +368,4 @@ class AnalystAgent(BaseAgent):
 
         return structure
 
-    def _extract_keywords(self, text: str) -> List[str]:
-        """Extract relevant keywords from issue text."""
-        stopwords = {
-            'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been',
-            'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-            'would', 'could', 'should', 'may', 'might', 'must', 'shall',
-            'can', 'need', 'to', 'of', 'in', 'for', 'on', 'with', 'at',
-            'by', 'from', 'as', 'into', 'through', 'during', 'before',
-            'after', 'above', 'below', 'between', 'under', 'again',
-            'further', 'then', 'once', 'and', 'but', 'or', 'nor', 'so',
-            'yet', 'both', 'each', 'few', 'more', 'most', 'other', 'some',
-            'such', 'no', 'not', 'only', 'own', 'same', 'than', 'too',
-            'very', 'just', 'create', 'add', 'implement', 'feature'
-        }
-        words = text.replace(',', ' ').replace('.', ' ').split()
-        return [w for w in words if w not in stopwords and len(w) > 2][:10]
+
