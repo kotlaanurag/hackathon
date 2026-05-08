@@ -1,0 +1,54 @@
+# {{ title }}
+
+## Problem Statement
+{{ problem_statement }}
+
+{% if root_causes %}
+## Root Cause Analysis
+{% for cause in root_causes %}
+- {{ cause }}
+{% endfor %}
+{% endif %}
+
+## Affected Components
+{% for component in affected_components %}
+- `{{ component.file }}`: {{ component.description }}
+{% endfor %}
+
+{% if dependency_context %}
+## Dependency Context
+```
+{{ dependency_context }}
+```
+{% endif %}
+
+## Proposed Solution
+
+### Implementation Steps
+{% for step in implementation_steps %}
+{{ loop.index }}. {{ step }}
+{% endfor %}
+
+{% if api_changes %}
+## API Changes
+| Field | Change | Validation Rule |
+|-------|--------|-----------------|
+{% for change in api_changes %}
+| {{ change.field }} | {{ change.description }} | {{ change.rule }} |
+{% endfor %}
+{% endif %}
+
+## Files to Modify
+{% for file in files_to_modify %}
+- `{{ file.path }}`: {{ file.change }}
+{% endfor %}
+
+## Testing Requirements
+{% for test in tests %}
+- [ ] {{ test }}
+{% endfor %}
+
+## Acceptance Criteria
+{% for criterion in acceptance_criteria %}
+- [ ] {{ criterion }}
+{% endfor %}

@@ -1,0 +1,32 @@
+# Graph configuration: thresholds, retry policies, feature flags
+
+retry_policy:
+  max_retries: 3
+  backoff_factor: 2.0
+  retry_on_status: [429, 500, 502, 503]
+
+thresholds:
+  max_error_log_lines: 500
+  max_repo_files_to_parse: 200
+  max_jira_stories: 50
+  context_token_limit: 80000
+
+llm:
+  default_model: "gpt-4o"
+  temperature: 0.2
+  max_tokens: 4096
+
+sources:
+  repo_parsing:
+    enabled: true
+    clone_depth: 1
+    file_extensions: [".py", ".cs", ".ts", ".js", ".java"]
+  log_analysis:
+    enabled: true
+    lookback_hours: 72
+    cluster_min_samples: 3
+  jira:
+    enabled: true
+    max_results: 50
+  excel_mapping:
+    enabled: true

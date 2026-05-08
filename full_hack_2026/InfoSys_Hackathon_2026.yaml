@@ -1,0 +1,18 @@
+resources:
+  repositories:
+    - repository: SourceCodeRepo
+      type: github
+      endpoint: github.com_EvGr-Hackathon-2026
+      name: "EvGr-Hackathon-2026/InfoSys_Hackathon_2026"
+      ref: 'master'
+      trigger:
+        branches:
+          include:
+            - "master"
+
+pool:
+  name: VMSS-Runners-Linux
+
+steps:
+  - powershell: |
+      "RUN STUFF"

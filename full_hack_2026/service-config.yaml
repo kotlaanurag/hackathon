@@ -1,0 +1,862 @@
+# @mcp-schema: service-config
+# @mcp-version: 3.0
+# @mcp-description: >
+#   Pipeline-level service configuration template for the Everest DevOps Pipeline-as-Code framework.
+#   Users copy this file to their ServiceConfig repo as 'service-config.yaml' and uncomment/configure
+#   the variables relevant to their application's build and deploy types.
+#   This file defines variables consumed by the CI (build) and CD (deploy) main templates.
+#   Variables here apply across ALL environments. For per-environment overrides, use service-config-{env}.yaml.
+# @mcp-usage: >
+#   1. Copy this file to your ServiceConfig repo root as 'service-config.yaml'
+#   2. Set 'Application_BuildType' to your build technology (e.g., 'dotnetcore', 'npm', 'python')
+#   3. Uncomment and configure the Build_* variables for that type
+#   4. Set 'Deploy_*_Enabled: true' for each deployment target you need
+#   5. Set global deploy variables here; per-environment values go in service-config-{env}.yaml
+#   6. For multi-technology builds, pipe-delimit types: 'dotnetcore|npm'
+#   7. To also build a Docker image, set 'Build_Docker: true' alongside your primary buildType
+# @mcp-precedence: >
+#   Values in service-config-{env}.yaml override values in service-config.yaml for the same key.
+#   Underscore-prefixed variables (_appRoot, _SASTTesting, etc.) are set by the pipeline framework
+#   and should NOT be overridden here.
+# @mcp-buildTypes: [esb, adf, dotnetcore, dotnetasp, python, npm, gradle, maven, terraform, dacpac, sitecore, powerplatform, gwpc, claimcenter, ccinternational, ircom, logicapp, apic, powerbi, pega, sources, mlops, docker, adb, adb1, dash, port_idp, astro, devops]
+# @mcp-deployTypes: [aks, adf, esb, terraform, terragrunt, iis, webapp, functions, dacpac, file, apic, mlops, mlopsmodel, powerbi, powerplatform, gwpc, claimcenter, claimcenterint, ircom, sitecore, cloudrun, dash, python, dotnet_custom, maven, tomcat, adbaction, azcopy, installer, pega, logicapp]
+# @mcp-relatedFiles:
+#   - Service-Config-Env-Template.yaml (per-environment overrides)
+#   - PipelineTemplate.yaml (pipeline definition that consumes this config)
+#   - CI: templates/main-azure-pipeline.yaml@citemplates
+#   - CD: templates/main-azure-pipeline.yaml@cdtemplates
+
+variables:
+#############################################################################################################################################################
+###                                                         SECTION 1: Global Configurables                                                               ###
+#############################################################################################################################################################
+## @mcp-section { name: "Build Naming", description: "Pipeline-wide build naming and versioning. These apply regardless of build or deploy type." }
+    ####################################
+  ##          Build Naming              ##
+############################################
+
+  ## @mcp { name: "Build_SourceDescription", type: "string", required: false, description: "Custom description appended to the build name for traceability. Appears in the pipeline run title.", example: "HotfixRelease_v2", scope: "global" }
+  # Build_SourceDescription: 'SomeChangeDescription'
+
+  ## @mcp { name: "Build_SourceVersion", type: "string", required: false, description: "Custom semantic version override for the build. When set, replaces the auto-generated build number.", example: "0.4.5", scope: "global" }
+  # Build_SourceVersion: 0.4.5
+
+## @mcp-section { name: "Config Updates", description: "Settings for runtime configuration file updates during deployment (token replacement, KeyVault secret injection). When enabled, runs config-updates.yaml after artifact download.", scope: "global", relatedTemplate: "config-updates.yaml" }
+    ####################################
+  ##          Config Updates           ##
+############################################
+
+  ## @mcp { name: "Deploy_Config_Updates", type: "string", required: false, description: "When 'true', enables configuration file updates during deployment using token replacement or KeyVault secrets.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Deploy_Config_Updates: 'true'
+
+  ## @mcp { name: "Deploy_Config_Updates_Type", type: "string", required: false, description: "Type of configuration update to perform. Determines the parsing engine used by ConfigurationsActions.ps1.", example: "JavaProperties", validValues: ["JavaProperties", "XMLAttribute", "XMLNode", "JSON", "YAML", "StringReplace"], scope: "global" }
+  # Deploy_Config_Updates_Type: 'JavaProperties'
+
+## @mcp-section { name: "Replace Tokens", description: "Token replacement in deployment artifacts using the ReplaceTokens task. Tokens in files are replaced with pipeline variable values.", scope: "global" }
+    ####################################
+  ##          Replace Tokens           ##
+############################################
+
+  ## @mcp { name: "Deploy_ReplaceToken_Enabled", type: "string", required: false, description: "When 'true', enables the Replace Tokens pre-deploy step for variable substitution in config files.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Deploy_ReplaceToken_Enabled: 'true'
+
+## @mcp-section { name: "File Transform", description: "File transformation during deployment. Supports XML transforms, JSON variable substitution, and config file overrides.", scope: "global", relatedTemplate: "file-transform.yaml" }
+    ####################################
+  ##         File Transform            ##
+############################################
+
+  ## @mcp { name: "Deploy_File_Transform_Enabled", type: "string", required: false, description: "When 'true', enables file transformation during deployment.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Deploy_File_Transform_Enabled: 'true'
+
+## @mcp-section { name: "Pre/Post Deploy Scripts", description: "Custom PowerShell scripts to run before or after the main deployment. Scripts are sourced from the pipeline repo's SharedScripts folder or defined inline.", scope: "global" }
+    ####################################
+  ##      Pre/Post Deploy Scripts      ##
+############################################
+
+  ## @mcp { name: "Pre_Deploy_Script", type: "string", required: false, description: "When 'true', runs a custom pre-deploy PowerShell script before the deployment steps.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Pre_Deploy_Script: 'true'
+
+  ## @mcp { name: "Pre_Deploy_Script_Args", type: "string", required: false, description: "Arguments passed to the pre-deploy PowerShell script.", example: "-Action Prepare -Verbose", scope: "global" }
+  # Pre_Deploy_Script_Args: ''
+
+  ## @mcp { name: "Post_Deploy_Script", type: "string", required: false, description: "When 'true', runs a custom post-deploy PowerShell script after the deployment steps.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Post_Deploy_Script: 'true'
+
+  ## @mcp { name: "Post_Deploy_Script_Args", type: "string", required: false, description: "Arguments passed to the post-deploy PowerShell script.", example: "-Action Verify -Verbose", scope: "global" }
+  # Post_Deploy_Script_Args: ''
+
+  ## @mcp { name: "Infra_Post_Deploy_Script", type: "string", required: false, description: "When 'true', runs an infrastructure post-deploy script (e.g., DNS updates, firewall rules).", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Infra_Post_Deploy_Script: 'true'
+
+  ## @mcp { name: "Infra_Post_Deploy_Script_Args", type: "string", required: false, description: "Arguments passed to the infrastructure post-deploy script.", example: "-Action ConfigureDNS", scope: "global" }
+  # Infra_Post_Deploy_Script_Args: ''
+
+## @mcp-section { name: "Service Actions", description: "Windows service start/stop/restart operations before or after deployment. Each action targets a remote server.", scope: "global", relatedTemplate: "service-actions.yaml" }
+    ####################################
+  ##         Service Actions           ##
+############################################
+
+  ## @mcp { name: "PreDeploy_Stop_Service", type: "string", required: false, description: "Windows service name to STOP before deployment begins.", example: "MyWindowsService", scope: "global" }
+  # PreDeploy_Stop_Service: 'MyWindowsService'
+
+  ## @mcp { name: "PreDeploy_Stop_Service_Target", type: "string", required: false, description: "Target server hostname for the pre-deploy service stop.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PreDeploy_Stop_Service_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "PreDeploy_Restart_Service", type: "string", required: false, description: "Windows service name to RESTART before deployment begins.", example: "IISAdmin", scope: "global" }
+  # PreDeploy_Restart_Service: 'IISAdmin'
+
+  ## @mcp { name: "PreDeploy_Restart_Service_Target", type: "string", required: false, description: "Target server hostname for the pre-deploy service restart.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PreDeploy_Restart_Service_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "PostDeploy_Start_Service", type: "string", required: false, description: "Windows service name to START after deployment completes.", example: "MyWindowsService", scope: "global" }
+  # PostDeploy_Start_Service: 'MyWindowsService'
+
+  ## @mcp { name: "PostDeploy_Start_Service_Target", type: "string", required: false, description: "Target server hostname for the post-deploy service start.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PostDeploy_Start_Service_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "PostDeploy_Restart_Service", type: "string", required: false, description: "Windows service name to RESTART after deployment completes.", example: "W3SVC", scope: "global" }
+  # PostDeploy_Restart_Service: 'W3SVC'
+
+  ## @mcp { name: "PostDeploy_Restart_Service_Target", type: "string", required: false, description: "Target server hostname for the post-deploy service restart.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PostDeploy_Restart_Service_Target: 'MYSERVER01.domain.net'
+
+## @mcp-section { name: "Multi Deploy", description: "Parallel multi-node deployment. When enabled, the deploy job runs once per node with variable overrides. Per-node config goes in service-config-{env}.yaml.", scope: "global" }
+    ####################################
+  ##          Multi Deploy             ##
+############################################
+
+  ## @mcp { name: "Multi_Deploy_Enabled", type: "string", required: false, description: "When 'true', enables parallel multi-node deployment. Requires Multi_Deploy_Overrides in the environment config.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # Multi_Deploy_Enabled: 'true'
+
+## @mcp-section { name: "AKS / Docker / Container", description: "Container and Kubernetes settings used when Build_Docker='true' or Deploy_Aks_Enabled='true'. These are pipeline-level (not per-environment).", scope: "buildType:docker|deployType:aks|deployType:cloudrun" }
+    ####################################
+  ##       AKS / Docker / Container    ##
+############################################
+
+  ## @mcp { name: "ApplicationName", type: "string", required: true, description: "Lowercase application name used as the Docker image name, Kubernetes release name, and cloud run service name. Must be DNS-compatible (a-z, 0-9, hyphens).", example: "basecamphub", scope: "buildType:docker|deployType:aks|deployType:cloudrun" }
+  # ApplicationName: 'basecamphub'
+
+  ## @mcp { name: "ContainerRegistryName", type: "string", required: false, description: "Name of the container registry (ACR, JFrog, or GAR). Used for Docker push and AKS/CloudRun pull.", example: "AzContainerRegistryD1", default: "azcontainerregistryprod", scope: "buildType:docker|deployType:aks" }
+  # ContainerRegistryName: 'azcontainerregistryprod'
+
+## @mcp-section { name: "Artifactory Publishing", description: "Settings for publishing build artifacts to JFrog Artifactory or Azure Artifacts as packages (npm, NuGet, Maven, pip, etc.).", scope: "global", relatedTemplate: "publish-package.yaml" }
+    ############################################
+  ##           Artifactory Publishing           ##
+####################################################
+
+  ## @mcp { name: "PublishPackage", type: "string", required: false, description: "When 'true', publishes build output as a package to JFrog Artifactory or Azure Artifacts.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # PublishPackage: 'true'
+
+  ## @mcp { name: "PublishPackage_Feed", type: "string", required: false, description: "Target feed/repository name for package publishing in JFrog or Azure Artifacts.", example: "Everest-Org-Common-Packages", scope: "global" }
+  # PublishPackage_Feed: 'Everest-Org-Common-Packages'
+
+  ## @mcp { name: "PublishPackage_Type", type: "string", required: false, description: "Package manager type for publishing.", example: "npm", validValues: ["npm", "nuget", "maven", "gradle", "pip", "universal"], scope: "global" }
+  # PublishPackage_Type: 'npm'
+
+  ## @mcp { name: "PublishPackage_Path", type: "string", required: false, description: "Path to the artifact(s) to publish.", example: "$(Build.ArtifactStagingDirectory)", default: "$(Build.ArtifactStagingDirectory)", scope: "global" }
+  # PublishPackage_Path: '$(Build.ArtifactStagingDirectory)'
+
+## @mcp-section { name: "File Copies", description: "Pre-build, post-build, and pre-deploy file copy operations. Format: Source>Destination per line. Destination ending in '/' means folder target; otherwise it renames the file.", scope: "global" }
+    ############################################
+  ##                File Copies                 ##
+####################################################
+
+  ## @mcp { name: "PreBuild_File_Copies", type: "multiline", required: false, description: "Pre-build file copy instructions. Each line: Source>Destination. Supports wildcards (*). Destination ending in '/' copies to folder; otherwise renames.", example: "Source/appsettings.Dev.json>Destination/appsettings.json", scope: "global" }
+  #PreBuild_File_Copies: |
+  #  Source/File.json>Destination/Ends/In/Frontslash/If/To/Folder/
+  #  Source/Folder>Destination/Ends/In/Frontslash/If/To/Folder/
+  #  Source/appsettings.Dev.json>Destination/Does/Not/End/In/Frontslash/If/Specifying/Name/appsettings.json
+  #  Source/*.json>Destination/Ends/In/Frontslash/If/To/Folder/
+
+  ## @mcp { name: "PostBuild_File_Copies", type: "multiline", required: false, description: "Post-build file copy instructions. Same format as PreBuild_File_Copies. Runs after application build completes.", example: "$(Build.ArtifactStagingDirectory)/config.json>$(Build.ArtifactStagingDirectory)/deploy/", scope: "global" }
+  #PostBuild_File_Copies: |
+  #  Source/File.json>Destination/Ends/In/Frontslash/If/To/Folder/
+
+  ## @mcp { name: "PreDeploy_File_Copies", type: "multiline", required: false, description: "Pre-deploy file copy instructions. Same format as PreBuild_File_Copies. Runs before application deployment.", example: "Source/web.config>$(Pipeline.Workspace)/drop/web.config", scope: "global" }
+  #PreDeploy_File_Copies: |
+  #  Source/File.json>Destination/Ends/In/Frontslash/If/To/Folder/
+
+## @mcp-section { name: "Multi Build", description: "Enables building the same solution with multiple configurations in parallel (e.g., per-environment DotNet builds).", scope: "global" }
+    ############################################
+  ##                Multi Build                 ##
+####################################################
+
+  ## @mcp { name: "Multi_Build", type: "string", required: false, description: "When 'true', enables parallel multi-configuration builds. Requires Multi_Build_Configuration.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  #Multi_Build: 'true'
+
+  ## @mcp { name: "Multi_Build_Parallelism", type: "string", required: false, description: "Maximum number of parallel build jobs for multi-build.", example: "5", default: "5", scope: "global" }
+  #Multi_Build_Parallelism: '5'
+
+  ## @mcp { name: "Multi_Build_Configuration", type: "json", required: false, description: "JSON object defining build configurations per environment. Each key is an environment name; its value is an object of build variable overrides.", example: "{\"DEV\":{\"Build_DotNetAsp_Configuration\":\"DEV\"},\"PROD\":{\"Build_DotNetAsp_Configuration\":\"PROD\"}}", scope: "global" }
+  #Multi_Build_Configuration: >-
+  #  {
+  #      "DEV": {
+  #          "Build_DotNetAsp_Configuration": "DEV",
+  #          "Build_DotNetAsp_Platform": "any cpu"
+  #      },
+  #      "PROD": {
+  #          "Build_DotNetAsp_Configuration": "PROD",
+  #          "Build_DotNetAsp_Platform": "any cpu"
+  #      }
+  #  }
+
+## @mcp-section { name: "ASPM Integration", description: "Application Security Posture Management integration for ArmorCode. Aggregates SAST, SCA, DAST results.", scope: "global" }
+    ############################################
+  ##          ASPM Integration                  ##
+####################################################
+
+  ## @mcp { name: "ASPMIntegration", type: "string", required: false, description: "When 'true', enables ArmorCode ASPM integration to aggregate security scan results.", example: "true", validValues: ["true", "false"], default: "false", scope: "global" }
+  # ASPMIntegration: 'true'
+
+#############################################################################################################################################################
+###                                                        SECTION 2: Build Configurables                                                                 ###
+#############################################################################################################################################################
+## @mcp-section { name: "Build Configuration", description: "Set Application_BuildType to ONE of the supported build types, then uncomment and configure the matching Build_* variables below. For multi-technology builds, use pipe-delimited types: 'dotnetcore|npm'." }
+
+## @mcp { name: "Application_BuildType", type: "string", required: true, description: "Primary build technology type. Determines which CI sub-template runs. Use '|' delimiter for multi-technology builds (e.g., 'dotnetcore|npm').", validValues: ["esb", "adf", "dotnetcore", "dotnetasp", "python", "npm", "gradle", "maven", "terraform", "dacpac", "sitecore", "powerplatform", "gwpc", "claimcenter", "ccinternational", "ircom", "logicapp", "apic", "powerbi", "pega", "sources", "mlops", "docker", "adb", "adb1", "dash", "port_idp", "astro", "devops"], example: "dotnetcore", scope: "build" }
+
+## @mcp-section { name: ".NET Core Build", description: "Configuration for .NET Core/6+/8+/9+/10+ application builds using dotnet CLI with JFrog NuGet feeds.", scope: "buildType:dotnetcore", relatedTemplate: "build-dotnet-core-jfrog.yaml" }
+    ################################
+  ##           DotNetCore           ##
+########################################
+  # Application_BuildType: 'dotnetcore'
+
+  ## @mcp { name: "Build_DotNetCore_Platform", type: "string", required: false, description: "Target platform for the build.", example: "any cpu", default: "any cpu", scope: "buildType:dotnetcore" }
+  # Build_DotNetCore_Platform: 'any cpu'
+
+  ## @mcp { name: "Build_DotNetCore_Projects", type: "multiline", required: true, description: "Glob pattern(s) for .csproj files. Parsed top-to-bottom: includes first, excludes prefixed with !.", example: "**/*.csproj", scope: "buildType:dotnetcore" }
+  # Build_DotNetCore_Projects: |
+  #   **/*.csproj
+  #   !**/tests/**/*.csproj
+
+  ## @mcp { name: "Build_DotNetCore_Configuration", type: "string", required: false, description: "dotnet build configuration.", example: "Release", default: "Release", scope: "buildType:dotnetcore" }
+  # Build_DotNetCore_Configuration: 'release'
+
+  ## @mcp { name: "Build_DotNetCore_UseGlobalJson", type: "string", required: false, description: "When 'true', uses global.json to determine .NET SDK version. When 'false', uses Build_DotNetCore_Version.", example: "false", default: "false", validValues: ["true", "false"], scope: "buildType:dotnetcore" }
+  # Build_DotNetCore_UseGlobalJson: "false"
+
+  ## @mcp { name: "Build_DotNetCore_Version", type: "string", required: false, description: "Explicit .NET SDK version. Used when Build_DotNetCore_UseGlobalJson is 'false'.", example: "8.0.101", scope: "buildType:dotnetcore" }
+  # Build_DotNetCore_Version: "8.0.101"
+
+  ## @mcp { name: "Build_DotNetCore_VstsFeed", type: "string", required: false, description: "Azure Artifacts feed GUID for NuGet package resolution (legacy; prefer JFrog).", example: "693c4a44-6437-4334-a9bd-7bfb151f64bf", scope: "buildType:dotnetcore", deprecated: true }
+  # Build_DotNetCore_VstsFeed: "693c4a44-6437-4334-a9bd-7bfb151f64bf"
+
+  ## @mcp { name: "Build_DotNetCore_PublishWeb", type: "string", required: false, description: "When 'true', publishes as a web deployment package instead of a console/library artifact.", example: "true", validValues: ["true", "false"], default: "false", scope: "buildType:dotnetcore" }
+  # Build_DotNetCore_PublishWeb: "true"
+
+## @mcp-section { name: ".NET Framework Build", description: "Configuration for .NET Framework ASP.NET application builds using MSBuild.", scope: "buildType:dotnetasp", relatedTemplate: "build-dotnet-aspnet-jfrog.yaml" }
+    #############################
+  ##           DotNetFX          ##
+#####################################
+  # Application_BuildType: 'dotnetasp'
+
+  ## @mcp { name: "Build_DotNetAsp_Platform", type: "string", required: false, description: "MSBuild platform target.", example: "any cpu", default: "any cpu", scope: "buildType:dotnetasp" }
+  # Build_DotNetAsp_Platform: 'any cpu'
+
+  ## @mcp { name: "Build_DotNetAsp_Projects", type: "multiline", required: false, description: "Glob pattern(s) for .sln or .csproj files. Parsed top-to-bottom with includes first then excludes.", example: "**\\*.sln", default: "**\\*.sln", scope: "buildType:dotnetasp" }
+  # Build_DotNetAsp_Projects: |
+  #   **\*.sln
+
+  ## @mcp { name: "Build_DotNetAsp_CustomMsBuildArgs", type: "string", required: false, description: "Additional MSBuild command-line arguments.", example: "/p:OutDir=$(Build.ArtifactStagingDirectory)", scope: "buildType:dotnetasp" }
+  # Build_DotNetAsp_CustomMsBuildArgs: '/p:OutDir=$(Build.ArtifactStagingDirectory)'
+
+  ## @mcp { name: "Build_DotNetAsp_Configuration", type: "string", required: false, description: "MSBuild configuration.", example: "Release", default: "Release", scope: "buildType:dotnetasp" }
+  # Build_DotNetAsp_Configuration: 'release'
+
+## @mcp-section { name: "Angular / NPM Build", description: "Configuration for Node.js/Angular/React application builds with npm and JFrog.", scope: "buildType:npm", relatedTemplate: "build-npm-jfrog.yaml" }
+    #############################
+  ##           Angular           ##
+#####################################
+  # Application_BuildType: 'npm'
+
+  ## @mcp { name: "Build_NPM_EnvNames", type: "string", required: true, description: "Comma-separated environment names. Each triggers a separate build iteration with environment-specific npm scripts.", example: "Dev,QA,Prod", scope: "buildType:npm" }
+  # Build_NPM_EnvNames: ''
+
+  ## @mcp { name: "Build_NPM_InstallCmd", type: "string", required: false, description: "npm command for dependency installation.", example: "install --legacy-peer-deps", default: "install", scope: "buildType:npm" }
+  # Build_NPM_InstallCmd: 'install --legacy-peer-deps'
+
+  ## @mcp { name: "Build_NPM_BuildCmd", type: "string", required: false, description: "npm script name for building. Environment name is appended automatically.", example: "build", default: "build", scope: "buildType:npm" }
+  # Build_NPM_BuildCmd: 'build'
+
+  ## @mcp { name: "Build_NPM_Node_Version", type: "string", required: false, description: "Node.js version for the build agent.", example: "18.x", default: "12.22.12", scope: "buildType:npm" }
+  # Build_NPM_Node_Version: '12.22.12'
+
+  ## @mcp { name: "Build_NPM_Python_Version", type: "string", required: false, description: "Python version used by node-gyp or native modules (if needed).", example: "3.7.x", scope: "buildType:npm" }
+  # Build_NPM_Python_Version: '3.7.x'
+
+## @mcp-section { name: "Python Build", description: "Configuration for Python application builds with pip and JFrog.", scope: "buildType:python", relatedTemplate: "build-python-jfrog.yaml" }
+    ############################
+  ##           Python           ##
+####################################
+  # Application_BuildType: 'python'
+
+  ## @mcp { name: "Build_Python_Version", type: "string", required: false, description: "Python runtime version.", example: "3.11", default: "3.x", scope: "buildType:python" }
+  # Build_Python_Version: "3.x"
+
+  ## @mcp { name: "Build_Python_PublishType", type: "string", required: false, description: "Artifact publish method.", example: "Archive", validValues: ["Archive", "Package", "CopyFiles"], default: "Archive", scope: "buildType:python" }
+  # Build_Python_PublishType: "Archive"
+
+## @mcp-section { name: "Gradle Build", description: "Configuration for Java/Kotlin Gradle builds with JFrog Artifactory integration.", scope: "buildType:gradle", relatedTemplate: "build-gradle-jfrog.yaml" }
+    ############################
+  ##           Gradle           ##
+####################################
+  # Application_BuildType: 'gradle'
+
+  ## @mcp { name: "Build_Gradle_Tasks", type: "string", required: false, description: "Gradle task names to execute.", example: "clean build", default: "clean build", scope: "buildType:gradle" }
+  # Build_Gradle_Tasks: 'clean build'
+
+  ## @mcp { name: "Build_Gradle_WrapperScript", type: "string", required: false, description: "Path to the Gradle wrapper script relative to source root.", example: "gradlew", default: "gradlew", scope: "buildType:gradle" }
+  # Build_Gradle_WrapperScript: 'gradlew'
+
+  ## @mcp { name: "Build_Gradle_Options", type: "string", required: false, description: "Additional Gradle command-line options.", example: "-PbuildType=release", scope: "buildType:gradle" }
+  # Build_Gradle_Options: ''
+
+  ## @mcp { name: "Build_Gradle_JavaVersion", type: "string", required: false, description: "Java JDK version for the build.", example: "17", default: "11", scope: "buildType:gradle" }
+  # Build_Gradle_JavaVersion: '11'
+
+## @mcp-section { name: "Maven Build", description: "Configuration for Java Maven builds with JFrog Artifactory integration.", scope: "buildType:maven", relatedTemplate: "build-maven-jfrog.yaml" }
+    ############################
+  ##           Maven            ##
+####################################
+  # Application_BuildType: 'maven'
+
+  ## @mcp { name: "Build_Maven_Goals", type: "string", required: false, description: "Maven goals/phases to execute.", example: "clean package", default: "clean package", scope: "buildType:maven" }
+  # Build_Maven_Goals: 'clean package'
+
+  ## @mcp { name: "Build_Maven_Options", type: "string", required: false, description: "Additional Maven command-line options.", example: "-DskipTests", scope: "buildType:maven" }
+  # Build_Maven_Options: ''
+
+  ## @mcp { name: "Build_Maven_PomFile", type: "string", required: false, description: "Path to the POM file relative to source root.", example: "pom.xml", default: "pom.xml", scope: "buildType:maven" }
+  # Build_Maven_PomFile: 'pom.xml'
+
+  ## @mcp { name: "Build_Maven_JavaVersion", type: "string", required: false, description: "Java JDK version for the build.", example: "17", default: "11", scope: "buildType:maven" }
+  # Build_Maven_JavaVersion: '11'
+
+## @mcp-section { name: "ESB Build", description: "Configuration for Enterprise Service Bus application builds.", scope: "buildType:esb", relatedTemplate: "build-esb.yaml" }
+    #########################
+  ##           ESB           ##
+#################################
+  # Application_BuildType: 'esb'
+
+  ## @mcp { name: "Build_ESB_RefData", type: "string", required: false, description: "Reference data repository in format 'Project/Repo/Branch'. Optionally append '>SubfolderName' for specific subfolder.", example: "ESB/ESB-Common/master", scope: "buildType:esb" }
+  # Build_ESB_RefData: 'ESB/ESB-Common/master'
+
+## @mcp-section { name: "ADF Build", description: "Configuration for Azure Data Factory pipeline builds (ARM template export).", scope: "buildType:adf", relatedTemplate: "build-adf.yaml" }
+    #########################
+  ##           ADF           ##
+#################################
+  # Application_BuildType: 'adf'
+
+  ## @mcp { name: "Build_ADF_SourceDev", type: "string", required: true, description: "Full Azure Resource ID of the development Data Factory instance to export ARM templates from.", example: "/subscriptions/10a0700e-a76a-462c-a11c-9af0bd677313/resourceGroups/Serraview-Dev-RG/providers/Microsoft.DataFactory/factories/erazserraviewadfd1", scope: "buildType:adf" }
+  #Build_ADF_SourceDev: '/subscriptions/{sub-id}/resourceGroups/{rg}/providers/Microsoft.DataFactory/factories/{factory-name}'
+
+  ## @mcp { name: "Build_ADF_NodeVersion", type: "string", required: false, description: "Node.js version for ADF utilities module (@microsoft/azure-data-factory-utilities).", example: ">=20.x", default: ">=20.x", scope: "buildType:adf" }
+  #Build_ADF_NodeVersion: '>=20.x'
+
+## @mcp-section { name: "DACPAC Build", description: "Configuration for SQL DACPAC (Data-tier Application Package) builds.", scope: "buildType:dacpac", relatedTemplate: "build-dacpac.yaml" }
+    ###########################
+  ##           DACPAC          ##
+###################################
+  # Application_BuildType: 'dacpac'
+
+  ## @mcp { name: "Build_Dacpac_Projects", type: "multiline", required: true, description: "Glob pattern(s) for .sqlproj files to build.", example: "**/*.sqlproj", scope: "buildType:dacpac" }
+  # Build_Dacpac_Projects: |
+  #   **/*.sqlproj
+
+  ## @mcp { name: "Build_Dacpac_Configuration", type: "string", required: false, description: "MSBuild configuration for DACPAC build.", example: "Release", default: "Release", scope: "buildType:dacpac" }
+  # Build_Dacpac_Configuration: 'Release'
+
+## @mcp-section { name: "Terraform / APIM Build", description: "Configuration for Terraform Infrastructure-as-Code builds.", scope: "buildType:terraform", relatedTemplate: "build-terraform.yaml" }
+    ##########################
+  ##         Terraform        ##
+##################################
+  # Application_BuildType: 'terraform'
+
+  ## @mcp { name: "Build_TF_StateFileName", type: "string", required: false, description: "Terraform state file name in remote backend.", example: "terraform.tfstate", scope: "buildType:terraform" }
+  # Build_TF_StateFileName: ''
+
+  ## @mcp { name: "Build_TF_Provider", type: "string", required: false, description: "Terraform provider name.", example: "azurerm", default: "azurerm", scope: "buildType:terraform" }
+  # Build_TF_Provider: 'azurerm'
+
+  ## @mcp { name: "Build_TF_Directory", type: "string", required: true, description: "Relative path to the Terraform configuration directory.", example: "IAC/maintain_CSR-GRP", scope: "buildType:terraform" }
+  # Build_TF_Directory: 'IAC/maintain_CSR-GRP'
+
+  ## @mcp { name: "Application_Name", type: "string", required: true, description: "Application name identifier for the Terraform module.", example: "my-apim-app", scope: "buildType:terraform" }
+  # Application_Name: ''
+
+## @mcp-section { name: "Sitecore Build", description: "Configuration for Sitecore CMS application builds with NuGet/JFrog.", scope: "buildType:sitecore", relatedTemplate: "build-sitecore-jfrog.yaml" }
+    ############################
+  ##          Sitecore          ##
+####################################
+  # Application_BuildType: 'sitecore'
+
+  ## @mcp { name: "Build_Sitecore_Projects", type: "multiline", required: true, description: "Glob pattern(s) for .sln or .csproj files.", example: "**\\*.sln", scope: "buildType:sitecore" }
+  # Build_Sitecore_Projects: |
+  #   **\*.sln
+
+  ## @mcp { name: "Build_Sitecore_Configuration", type: "string", required: false, description: "MSBuild configuration.", example: "Release", default: "Release", scope: "buildType:sitecore" }
+  # Build_Sitecore_Configuration: 'Release'
+
+  ## @mcp { name: "Build_Sitecore_Platform", type: "string", required: false, description: "MSBuild platform target.", example: "any cpu", default: "any cpu", scope: "buildType:sitecore" }
+  # Build_Sitecore_Platform: 'any cpu'
+
+## @mcp-section { name: "APIC Build", description: "Configuration for IBM API Connect validation builds.", scope: "buildType:apic", relatedTemplate: "build-apic.yaml" }
+    ##########################
+  ##           APIC           ##
+##################################
+  # Application_BuildType: 'apic'
+
+## @mcp-section { name: "Logic App Build", description: "Configuration for Azure Logic App project builds. Supports ARMDeploy, Standard, and StandardARM build types.", scope: "buildType:logicapp", relatedTemplate: "build-logicapp.yaml" }
+    #############################
+  ##          Logic App          ##
+#####################################
+  # Application_BuildType: 'logicapp'
+
+  ## @mcp { name: "Build_LogicApp_Project", type: "multiline", required: true, description: "Glob pattern(s) for .deployproj files to build. Parsed top-to-bottom: includes first, then excludes (prefix with !).", example: "**/*.deployproj", scope: "buildType:logicapp" }
+  #Build_LogicApp_Project: |
+  #   **/*.deployproj
+  #   !**/tests/**/*.deployproj
+
+## @mcp-section { name: "Power Platform Build", description: "Configuration for Power Platform / Dataverse solution export and packaging.", scope: "buildType:powerplatform", relatedTemplate: "build-powerplatform.yaml" }
+    #############################
+  ##       Power Platform        ##
+#####################################
+  # Application_BuildType: 'powerplatform'
+
+  ## @mcp { name: "Build_PowerPlatform_Publish", type: "string", required: false, description: "When 'true', auto-publishes customizations before export.", example: "false", default: "false", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_Publish: 'false'
+
+  ## @mcp { name: "Build_PowerPlatform_AdminVersion", type: "string", required: false, description: "Microsoft.Xrm.Tooling.CrmConnector.PowerShell module version.", example: "2.0.66", default: "2.0.66", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_AdminVersion: '2.0.66'
+
+  ## @mcp { name: "Build_PowerPlatform_XrmTPDVersion", type: "string", required: false, description: "Xrm Tooling PackageDeployment module version.", example: "3.3.0.891", default: "3.3.0.891", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_XrmTPDVersion: '3.3.0.891'
+
+  ## @mcp { name: "Build_PowerPlatform_CheckerVersion", type: "string", required: false, description: "Microsoft.PowerApps.Checker.PowerShell module version.", example: "1.0.12", default: "1.0.12", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_CheckerVersion: '1.0.12'
+
+  ## @mcp { name: "Build_PowerPlatform_CrmSCTVersion", type: "string", required: false, description: "Microsoft.CrmSdk.CoreTools version for SolutionPackager.", example: "9.1.0.44", default: "9.1.0.44", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_CrmSCTVersion: '9.1.0.44'
+
+  ## @mcp { name: "Build_PowerPlatform_XrmOMAVersion", type: "string", required: false, description: "Xrm Online Management API module version.", example: "1.2.0.1", default: "1.2.0.1", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_XrmOMAVersion: '1.2.0.1'
+
+  ## @mcp { name: "Build_PowerPlatform_SolutionType", type: "string", required: false, description: "Solution export type.", example: "Managed", validValues: ["Managed", "Unmanaged", "Both"], default: "Managed", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_SolutionType: 'Managed'
+
+  ## @mcp { name: "Build_PowerPlatform_ExportBranch", type: "string", required: false, description: "Branch name where exported solution source is published.", example: "publish", default: "publish", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_ExportBranch: 'publish'
+
+  ## @mcp { name: "Build_PowerPlatform_PowerPlatformSPN", type: "string", required: true, description: "Azure DevOps service connection name for Power Platform SPN authentication.", example: "PowerPlatform-EmployeeAnalytics-DevOps-Dev", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_PowerPlatformSPN: 'PowerPlatform-EmployeeAnalytics-DevOps-Dev'
+
+  ## @mcp { name: "Build_PowerPlatform_Solution", type: "string", required: true, description: "Dataverse solution unique name to export.", example: "EmployeeAnalyticsSolution", scope: "buildType:powerplatform" }
+  # Build_PowerPlatform_Solution: 'EmployeeAnalyticsSolution'
+
+## @mcp-section { name: "Guidewire PolicyCenter Build", description: "Configuration for Guidewire PolicyCenter Java application builds using gwb.bat.", scope: "buildType:gwpc", relatedTemplate: "build-policycenter.yaml" }
+    #############################
+  ##            GW_PC            ##
+#####################################
+  # Application_BuildType: 'gwpc'
+
+  ## @mcp { name: "Build_GWPC_JavaVersion", type: "string", required: false, description: "Java JDK version preinstalled on the build server.", example: "8", default: "8", scope: "buildType:gwpc" }
+  # Build_GWPC_JavaVersion: '8'
+
+  ## @mcp { name: "Build_GWPC_BuildCmd", type: "string", required: false, description: "Guidewire build command executable.", example: "gwb.bat", default: "gwb.bat", scope: "buildType:gwpc" }
+  # Build_GWPC_BuildCmd: 'gwb.bat'
+
+  ## @mcp { name: "Build_GWPC_BuildArgs", type: "string", required: false, description: "Arguments for the Guidewire build command.", example: "warTomcatDbcp -DincludeGtest=true", default: "warTomcatDbcp -DincludeGtest=true", scope: "buildType:gwpc" }
+  # Build_GWPC_BuildArgs: 'warTomcatDbcp -DincludeGtest=true'
+
+  ## @mcp { name: "Build_GWPC_TestCmd", type: "string", required: false, description: "Guidewire test command executable.", example: "gwb.bat", default: "gwb.bat", scope: "buildType:gwpc" }
+  # Build_GWPC_TestCmd: 'gwb.bat'
+
+  ## @mcp { name: "Build_GWPC_TestArgs", type: "string", required: false, description: "Arguments for the Guidewire test command.", example: "test -Dtestpackage=com.everestre", default: "test -Dtestpackage=com.everestre", scope: "buildType:gwpc" }
+  # Build_GWPC_TestArgs: 'test -Dtestpackage=com.everestre'
+
+## @mcp-section { name: "ClaimCenter Build", description: "Configuration for Guidewire ClaimCenter application builds.", scope: "buildType:claimcenter", relatedTemplate: "build-claimcenter.yaml" }
+    #################################
+  ##          ClaimCenter            ##
+#########################################
+  # Application_BuildType: 'claimcenter'
+
+## @mcp-section { name: "ClaimCenter International Build", description: "Configuration for Guidewire ClaimCenter International application builds.", scope: "buildType:ccinternational", relatedTemplate: "build-claimcenter-international.yaml" }
+    #########################################
+  ##       ClaimCenter International         ##
+###############################################
+  # Application_BuildType: 'ccinternational'
+
+## @mcp-section { name: "IRCOM Build", description: "Configuration for IRCOM COM component builds.", scope: "buildType:ircom", relatedTemplate: "build-ircom.yaml" }
+    ##########################
+  ##           IRCOM          ##
+##################################
+  # Application_BuildType: 'ircom'
+
+## @mcp-section { name: "PEGA Build", description: "Configuration for Pega Platform application builds with optional unit testing.", scope: "buildType:pega", relatedTemplate: "build-pega.yaml" }
+    ##########################
+  ##           PEGA           ##
+##################################
+  # Application_BuildType: 'pega'
+
+  ## @mcp { name: "Build_PEGA_Key", type: "string", required: true, description: "KeyVault secret reference for PEGA API authentication. Use $(secret-name) syntax.", example: "$(PEGA-EverestDevOpsAdmin-Dev)", scope: "buildType:pega" }
+  #Build_PEGA_Key: '$(PEGA-EverestDevOpsAdmin-Dev)'
+
+  ## @mcp { name: "Build_PEGA_UnitTestGroup", type: "string", required: false, description: "PEGA test group identifier for unit test execution.", example: "FNOL:Authors", scope: "buildType:pega" }
+  #Build_PEGA_UnitTestGroup: "FNOL:Authors"
+
+  ## @mcp { name: "Build_PEGA_UnitTestSuite", type: "string", required: false, description: "PEGA test suite name to execute.", example: "EVERST-FNOL-WORK!TS_FNOLUNITTESTSUITE", scope: "buildType:pega" }
+  #Build_PEGA_UnitTestSuite: "EVERST-FNOL-WORK!TS_FNOLUNITTESTSUITE"
+
+## @mcp-section { name: "Power BI Build", description: "Configuration for Power BI report packaging.", scope: "buildType:powerbi", relatedTemplate: "build-power-bi.yaml" }
+    #############################
+  ##           PowerBI           ##
+#####################################
+  # Application_BuildType: 'powerbi'
+
+## @mcp-section { name: "MLOps Build", description: "Configuration for Databricks MLOps pipeline builds.", scope: "buildType:mlops", relatedTemplate: "build-mlops.yaml" }
+    ##########################
+  ##           MLOps          ##
+##################################
+  # Application_BuildType: 'mlops'
+
+## @mcp-section { name: "Azure Databricks Build", description: "Configuration for Azure Databricks notebook/library builds.", scope: "buildType:adb", relatedTemplate: "build-adb.yaml" }
+    #########################
+  ##           ADB           ##
+#################################
+  # Application_BuildType: 'adb'
+
+## @mcp-section { name: "Azure Databricks DataLake Build", description: "Configuration for Databricks DataLake Ecosystem builds.", scope: "buildType:adb1", relatedTemplate: "build-adb-datalakeecosystem.yaml" }
+    ##################################
+  ##     ADB DataLake Ecosystem       ##
+##########################################
+  # Application_BuildType: 'adb1'
+
+## @mcp-section { name: "Dash Build", description: "Configuration for Dash/Plotly web application builds.", scope: "buildType:dash", relatedTemplate: "build-dash.yaml" }
+    #########################
+  ##           Dash          ##
+#################################
+  # Application_BuildType: 'dash'
+
+## @mcp-section { name: "Sources Build", description: "Copies the source code directory as-is to the artifact staging area. No compilation step.", scope: "buildType:sources", relatedTemplate: "build-sourcesdirectory.yaml" }
+    ############################
+  ##         Sources Dir        ##
+####################################
+  # Application_BuildType: 'sources'
+
+## @mcp-section { name: "Port IDP Build", description: "Configuration for Port.io Internal Developer Platform builds.", scope: "buildType:port_idp", relatedTemplate: "build-port_idp.yaml" }
+    ############################
+  ##         Port IDP           ##
+####################################
+  # Application_BuildType: 'port_idp'
+
+## @mcp-section { name: "Astro Build", description: "Configuration for Astro/Astronomer Airflow DAG builds.", scope: "buildType:astro", relatedTemplate: "build-astro.yaml" }
+    ##########################
+  ##           Astro          ##
+##################################
+  # Application_BuildType: 'astro'
+
+## @mcp-section { name: "Docker Build", description: "Configuration for Docker image builds. Enable alongside another buildType to also containerize the output.", scope: "buildType:docker", relatedTemplate: "docker-build.yaml" }
+    ############################
+  ##           Docker           ##
+####################################
+
+  ## @mcp { name: "Build_Docker", type: "string", required: false, description: "When 'true', builds and pushes a Docker image after the application build. Can be combined with any buildType.", example: "true", validValues: ["true", "false"], default: "false", scope: "buildType:docker" }
+  # Build_Docker: 'true'
+
+  ## @mcp { name: "Build_Docker_File", type: "string", required: false, description: "Path to the Dockerfile relative to source root.", example: "Dockerfile", default: "Dockerfile", scope: "buildType:docker" }
+  # Build_Docker_File: 'Dockerfile'
+
+  ## @mcp { name: "Build_Docker_Context", type: "string", required: false, description: "Docker build context directory.", example: ".", default: ".", scope: "buildType:docker" }
+  # Build_Docker_Context: '.'
+
+  ## @mcp { name: "Build_Docker_Args", type: "string", required: false, description: "Additional Docker build arguments.", example: "--build-arg ENV=prod", scope: "buildType:docker" }
+  # Build_Docker_Args: ''
+
+#############################################################################################################################################################
+###                                                       SECTION 3: Release Configurables                                                                ###
+#############################################################################################################################################################
+## @mcp-section { name: "Deploy Configuration", description: "Enable one or more Deploy_*_Enabled flags to activate deployment targets. Per-environment settings go in service-config-{env}.yaml. Multiple deploy types can be enabled simultaneously." }
+
+## @mcp-section { name: "AKS Deploy", description: "Deploys to Azure Kubernetes Service using Helm charts. Supports blue/green, multi-region (US/UK/IND).", scope: "deployType:aks", relatedTemplate: "aks-deploy.yaml" }
+    #########################
+  ##           AKS           ##
+#################################
+
+  ## @mcp { name: "Deploy_Aks_Enabled", type: "string", required: false, description: "When 'true', enables AKS Helm deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:aks" }
+  # Deploy_Aks_Enabled: 'true'
+
+  ## @mcp { name: "Deploy_Aks_ChartName", type: "string", required: false, description: "Helm chart name to deploy.", example: "k8s-deployment-chart", default: "k8s-deployment-chart", scope: "deployType:aks" }
+  # Deploy_Aks_ChartName: 'k8s-deployment-chart'
+
+  ## @mcp { name: "Deploy_Aks_ChartVersion", type: "string", required: false, description: "Helm chart version.", example: "0.5.0", scope: "deployType:aks" }
+  # Deploy_Aks_ChartVersion: '0.5.0'
+
+  ## @mcp { name: "Deploy_Aks_Timeout", type: "string", required: false, description: "Timeout for Helm deployment operations in Go duration format.", example: "10m", default: "10m", scope: "deployType:aks" }
+  # Deploy_Aks_Timeout: '10m'
+
+## @mcp-section { name: "ADF Deploy", description: "Deploys Azure Data Factory pipelines via ARM template.", scope: "deployType:adf", relatedTemplate: "adf-deploy.yaml" }
+    #########################
+  ##           ADF           ##
+#################################
+
+  ## @mcp { name: "Deploy_ADF_Enabled", type: "string", required: false, description: "When 'true', enables Azure Data Factory deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:adf" }
+  # Deploy_ADF_Enabled: 'true'
+
+## @mcp-section { name: "ESB Deploy", description: "Deploys ESB artifacts to deployment nodes with optional config updates.", scope: "deployType:esb", relatedTemplate: "esb-deploy.yaml" }
+    #########################
+  ##           ESB           ##
+#################################
+
+  ## @mcp { name: "Deploy_ESB_Enabled", type: "string", required: false, description: "When 'true', enables ESB deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:esb" }
+  # Deploy_ESB_Enabled: 'true'
+
+## @mcp-section { name: "Terraform Deploy", description: "Deploys Terraform configurations with remote state in Azure Blob Storage.", scope: "deployType:terraform", relatedTemplate: "terraform-deploy.yaml" }
+    ##########################
+  ##         Terraform        ##
+##################################
+
+  ## @mcp { name: "Deploy_Terraform_Enabled", type: "string", required: false, description: "When 'true', enables Terraform deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:terraform" }
+  # Deploy_Terraform_Enabled: 'true'
+
+  ## @mcp { name: "Deploy_TF_ModuleRef", type: "string", required: false, description: "Azure Repos reference for Terraform module in format 'Project/Repo/Branch'.", example: "APIM_IntegrationAPIS/APIM-Terraform-Module/master", scope: "deployType:terraform" }
+  # Deploy_TF_ModuleRef: 'APIM_IntegrationAPIS/APIM-Terraform-Module/master'
+
+  ## @mcp { name: "Deploy_TF_AppName", type: "string", required: false, description: "Application name for Terraform deployment naming.", example: "my-apim-terraform", scope: "deployType:terraform" }
+  # Deploy_TF_AppName: ''
+
+## @mcp-section { name: "Terragrunt Deploy", description: "Deploys infrastructure using Terragrunt (Terraform wrapper). Supports multi-region and multi-division.", scope: "deployType:terragrunt", relatedTemplate: "iac-terragrunt-deploy.yaml" }
+    #############################
+  ##         Terragrunt          ##
+#####################################
+
+  ## @mcp { name: "Deploy_Terragrunt_Enabled", type: "string", required: false, description: "When 'true', enables Terragrunt deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:terragrunt" }
+  # Deploy_Terragrunt_Enabled: 'true'
+
+## @mcp-section { name: "Web App Deploy", description: "Deploys to Azure App Service (Web Apps).", scope: "deployType:webapp", relatedTemplate: "azure-app-deploy.yaml" }
+    #############################
+  ##           Web App           ##
+#####################################
+
+  ## @mcp { name: "Deploy_WebApp_Enabled", type: "string", required: false, description: "When 'true', enables Azure Web App deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:webapp" }
+  # Deploy_WebApp_Enabled: 'true'
+
+  ## @mcp { name: "Deploy_WebApp_Type", type: "string", required: false, description: "Azure App Service type.", example: "webAppLinux", validValues: ["webApp", "webAppLinux", "webAppContainer"], default: "webApp", scope: "deployType:webapp" }
+  # Deploy_WebApp_Type: 'webAppLinux'
+
+  ## @mcp { name: "Deploy_WebApp_Stack", type: "string", required: false, description: "Runtime stack for Linux web apps.", example: "PYTHON|3.11", scope: "deployType:webapp" }
+  # Deploy_WebApp_Stack: 'PYTHON|3.11'
+
+  ## @mcp { name: "Deploy_WebApp_Startup", type: "string", required: false, description: "Startup command for the web app.", example: "streamlit run app.py", scope: "deployType:webapp" }
+  # Deploy_WebApp_Startup: 'streamlit run app.py'
+
+## @mcp-section { name: "Functions Deploy", description: "Deploys to Azure Functions.", scope: "deployType:functions", relatedTemplate: "azure-functions-deploy.yaml" }
+    ###############################
+  ##           Functions           ##
+#######################################
+
+  ## @mcp { name: "Deploy_Functions_Enabled", type: "string", required: false, description: "When 'true', enables Azure Functions deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:functions" }
+  # Deploy_Functions_Enabled: 'true'
+
+  ## @mcp { name: "Deploy_Functions_Type", type: "string", required: false, description: "Azure Function App type.", example: "functionAppLinux", validValues: ["functionApp", "functionAppLinux"], default: "functionApp", scope: "deployType:functions" }
+  # Deploy_Functions_Type: 'functionAppLinux'
+
+  ## @mcp { name: "Deploy_Functions_Stack", type: "string", required: false, description: "Function App runtime stack.", example: "PYTHON|3.9", validValues: ["DOTNET|6.0", "DOTNET-ISOLATED|6.0", "DOTNET-ISOLATED|7.0", "DOTNET-ISOLATED|8.0", "JAVA|8", "JAVA|11", "JAVA|17", "JAVA|21", "NODE|14", "NODE|16", "NODE|18", "NODE|20", "PYTHON|3.8", "PYTHON|3.9", "PYTHON|3.10", "PYTHON|3.11"], scope: "deployType:functions" }
+  # Deploy_Functions_Stack: 'PYTHON|3.9'
+
+## @mcp-section { name: "DACPAC Deploy", description: "Deploys SQL DACPAC packages to SQL Server/Azure SQL databases.", scope: "deployType:dacpac", relatedTemplate: "dacpac-deploy.yaml" }
+    ###########################
+  ##          DACPAC           ##
+###################################
+
+  ## @mcp { name: "Deploy_Dacpac_Enabled", type: "string", required: false, description: "When 'true', enables SQL DACPAC deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:dacpac" }
+  # Deploy_Dacpac_Enabled: 'true'
+
+## @mcp-section { name: "IIS Deploy", description: "Deploys to Windows IIS web servers using WebDeploy or file copy.", scope: "deployType:iis", relatedTemplate: "IIS-Deploy.yaml" }
+    #########################
+  ##           IIS           ##
+#################################
+
+  ## @mcp { name: "Deploy_IIS_Enabled", type: "string", required: false, description: "When 'true', enables IIS deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:iis" }
+  # Deploy_IIS_Enabled: 'true'
+
+  ## @mcp { name: "Deploy_IIS_Restart", type: "string", required: false, description: "When 'true', restarts IIS after deployment.", example: "true", validValues: ["true", "false"], default: "true", scope: "deployType:iis" }
+  # Deploy_IIS_Restart: 'true'
+
+## @mcp-section { name: "File Deploy", description: "Deploys files to a remote server using Windows Machine File Copy.", scope: "deployType:file", relatedTemplate: "file-deploy.yaml" }
+    #########################
+  ##           File          ##
+#################################
+
+  ## @mcp { name: "Deploy_File_Enabled", type: "string", required: false, description: "When 'true', enables file copy deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:file" }
+  # Deploy_File_Enabled: 'true'
+
+## @mcp-section { name: "Sitecore Deploy", description: "Deploys Sitecore CMS packages to Azure Web Apps with role-based deployments.", scope: "deployType:sitecore", relatedTemplate: "sitecore-deploy.yaml" }
+    ############################
+  ##          Sitecore          ##
+####################################
+
+  ## @mcp { name: "Deploy_Sitecore_Enabled", type: "string", required: false, description: "When 'true', enables Sitecore deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:sitecore" }
+  # Deploy_Sitecore_Enabled: 'true'
+
+## @mcp-section { name: "GCP Cloud Run Deploy", description: "Deploys containers to Google Cloud Run.", scope: "deployType:cloudrun", relatedTemplate: "gcp-cloudrun-deploy.yaml" }
+    ##################################
+  ##        GCP Cloud Run             ##
+##########################################
+
+  ## @mcp { name: "Deploy_CloudRun_Enabled", type: "string", required: false, description: "When 'true', enables Google Cloud Run deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:cloudrun" }
+  # Deploy_CloudRun_Enabled: 'true'
+
+## @mcp-section { name: "Logic App Deploy", description: "Deploys Azure Logic Apps using ARM, ZipDeploy, or Standard deployment.", scope: "deployType:logicapp", relatedTemplate: "logicapp-deploy.yaml" }
+    #############################
+  ##          Logic App          ##
+#####################################
+
+  ## @mcp { name: "Deploy_LogicApp_Enabled", type: "string", required: false, description: "When 'true', enables Logic App deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:logicapp" }
+  # Deploy_LogicApp_Enabled: 'true'
+
+## @mcp-section { name: "APIC Deploy", description: "Deploys API Connect configurations.", scope: "deployType:apic", relatedTemplate: "apic-deploy.yaml" }
+    ##########################
+  ##           APIC           ##
+##################################
+
+  ## @mcp { name: "Deploy_APIC_Enabled", type: "string", required: false, description: "When 'true', enables API Connect deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:apic" }
+  # Deploy_APIC_Enabled: 'true'
+
+  ## @mcp { name: "Deploy_APIC_Space", type: "string", required: false, description: "API Connect catalog space name for deployment.", example: "Insurance", scope: "deployType:apic" }
+  # Deploy_APIC_Space: 'Insurance'
+
+## @mcp-section { name: "PEGA Deploy", description: "Deploys Pega Platform applications.", scope: "deployType:pega", relatedTemplate: "pega-deploy.yaml" }
+    ##########################
+  ##           PEGA           ##
+##################################
+
+  ## @mcp { name: "Deploy_Pega_Enabled", type: "string", required: false, description: "When 'true', enables Pega deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:pega" }
+  # Deploy_Pega_Enabled: 'true'
+
+## @mcp-section { name: "Power BI Deploy", description: "Deploys Power BI reports and datasets.", scope: "deployType:powerbi", relatedTemplate: "power-bi-deploy.yaml" }
+    #############################
+  ##           PowerBI           ##
+#####################################
+
+  ## @mcp { name: "Deploy_PowerBI_Enabled", type: "string", required: false, description: "When 'true', enables Power BI deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:powerbi" }
+  # Deploy_PowerBI_Enabled: 'true'
+
+## @mcp-section { name: "Power Platform Deploy", description: "Deploys Power Platform/Dataverse solutions.", scope: "deployType:powerplatform", relatedTemplate: "powerplatform-deploy.yaml" }
+    ##################################
+  ##        Power Platform            ##
+##########################################
+
+  ## @mcp { name: "Deploy_PowerPlatform_Enabled", type: "string", required: false, description: "When 'true', enables Power Platform/Dataverse solution deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:powerplatform" }
+  # Deploy_PowerPlatform_Enabled: 'true'
+
+## @mcp-section { name: "Guidewire PolicyCenter Deploy", description: "Deploys Guidewire PolicyCenter WAR to Tomcat servers.", scope: "deployType:gwpc", relatedTemplate: "policycenter-deploy.yaml" }
+    #############################
+  ##            GW_PC            ##
+#####################################
+
+  ## @mcp { name: "Deploy_GWPC_Enabled", type: "string", required: false, description: "When 'true', enables Guidewire PolicyCenter deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:gwpc" }
+  # Deploy_GWPC_Enabled: 'true'
+
+## @mcp-section { name: "ClaimCenter Deploy", description: "Deploys Guidewire ClaimCenter to Tomcat servers.", scope: "deployType:claimcenter", relatedTemplate: "claimcenter-deploy.yaml" }
+    #################################
+  ##          ClaimCenter            ##
+#########################################
+
+  ## @mcp { name: "Deploy_GWCC_Enabled", type: "string", required: false, description: "When 'true', enables Guidewire ClaimCenter deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:claimcenter" }
+  # Deploy_GWCC_Enabled: 'true'
+
+## @mcp-section { name: "ClaimCenter International Deploy", description: "Deploys Guidewire ClaimCenter International instances.", scope: "deployType:claimcenterint", relatedTemplate: "cc-int-deploy.yaml" }
+    #########################################
+  ##     ClaimCenter International           ##
+###############################################
+
+  ## @mcp { name: "Deploy_GWCC_International_Enabled", type: "string", required: false, description: "When 'true', enables ClaimCenter International deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:claimcenterint" }
+  # Deploy_GWCC_International_Enabled: 'true'
+
+## @mcp-section { name: "IRCOM Deploy", description: "Deploys IRCOM COM components with regasm registration.", scope: "deployType:ircom", relatedTemplate: "ircom-deploy.yaml" }
+    ##########################
+  ##           IRCOM          ##
+##################################
+
+  ## @mcp { name: "Deploy_IRCOM_Enabled", type: "string", required: false, description: "When 'true', enables IRCOM component deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:ircom" }
+  # Deploy_IRCOM_Enabled: 'true'
+
+## @mcp-section { name: "MLOps Deploy", description: "Deploys Databricks MLOps workflows.", scope: "deployType:mlops", relatedTemplate: "mlops-deploy.yaml" }
+    ##########################
+  ##           MLOps          ##
+##################################
+
+  ## @mcp { name: "Deploy_MLOps_Enabled", type: "string", required: false, description: "When 'true', enables Databricks MLOps workflow deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:mlops" }
+  # Deploy_MLOps_Enabled: 'true'
+
+## @mcp-section { name: "MLOps Model Deploy", description: "Deploys ML model versions to Databricks endpoints.", scope: "deployType:mlopsmodel", relatedTemplate: "mlops-model-deploy.yaml" }
+    ##################################
+  ##        MLOps Model               ##
+##########################################
+
+  ## @mcp { name: "Deploy_MLOps_Model_Enabled", type: "string", required: false, description: "When 'true', enables ML model deployment to Databricks.", example: "true", validValues: ["true", "false"], scope: "deployType:mlopsmodel" }
+  # Deploy_MLOps_Model_Enabled: 'true'
+
+## @mcp-section { name: "Tomcat Deploy", description: "Deploys WAR files to Apache Tomcat servers.", scope: "deployType:tomcat", relatedTemplate: "tomcat-deploy.yaml" }
+    ############################
+  ##          Tomcat            ##
+####################################
+
+  ## @mcp { name: "Deploy_Tomcat_Enabled", type: "string", required: false, description: "When 'true', enables Tomcat WAR deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:tomcat" }
+  # Deploy_Tomcat_Enabled: 'true'
+
+## @mcp-section { name: "Maven Deploy", description: "Deploys Maven-built Java applications to Azure Web Apps.", scope: "deployType:maven", relatedTemplate: "maven-deploy.yaml" }
+    ##########################
+  ##          Maven           ##
+##################################
+
+  ## @mcp { name: "Deploy_Maven_Enabled", type: "string", required: false, description: "When 'true', enables Maven deployment to Azure Web App.", example: "true", validValues: ["true", "false"], scope: "deployType:maven" }
+  # Deploy_Maven_Enabled: 'true'
+
+## @mcp-section { name: "Dash Deploy", description: "Deploys Dash/Plotly applications to target servers.", scope: "deployType:dash", relatedTemplate: "dash-deploy.yaml" }
+    #########################
+  ##           Dash          ##
+#################################
+
+  ## @mcp { name: "Deploy_Dash_Enabled", type: "string", required: false, description: "When 'true', enables Dash deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:dash" }
+  # Deploy_Dash_Enabled: 'true'
+
+## @mcp-section { name: "ADB Actions Deploy", description: "Deploys notebooks, libraries, or jobs to Azure Databricks.", scope: "deployType:adbaction", relatedTemplate: "adb-adbactions.yaml" }
+    ##################################
+  ##        ADB Actions               ##
+##########################################
+
+  ## @mcp { name: "Deploy_ADBAction_Enabled", type: "string", required: false, description: "When 'true', enables Databricks deployment actions.", example: "true", validValues: ["true", "false"], scope: "deployType:adbaction" }
+  # Deploy_ADBAction_Enabled: 'true'
+
+## @mcp-section { name: "Python Deploy", description: "Deploys Python packages to Databricks from Azure Artifacts.", scope: "deployType:python", relatedTemplate: "adb-python-deploy.yaml" }
+    ##################################
+  ##        Python Deploy              ##
+##########################################
+
+  ## @mcp { name: "Deploy_Python_Enabled", type: "string", required: false, description: "When 'true', enables Python package deployment to Databricks.", example: "true", validValues: ["true", "false"], scope: "deployType:python" }
+  # Deploy_Python_Enabled: 'true'
+
+## @mcp-section { name: "Azure Copy Deploy", description: "Copies files to Azure Blob Storage or Azure File Share using AzCopy.", scope: "deployType:azcopy", relatedTemplate: "az-copy-deploy.yaml" }
+    ##################################
+  ##          Azure Copy               ##
+##########################################
+
+  ## @mcp { name: "Deploy_Az_Copy_Enabled", type: "string", required: false, description: "When 'true', enables Azure Copy deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:azcopy" }
+  # Deploy_Az_Copy_Enabled: 'true'
+
+## @mcp-section { name: "Installer Deploy", description: "Runs an installer executable on target servers.", scope: "deployType:installer", relatedTemplate: "installer-deploy.yaml" }
+    #############################
+  ##         Installer           ##
+#####################################
+
+  ## @mcp { name: "Deploy_Installer_Enabled", type: "string", required: false, description: "When 'true', enables installer-based deployment.", example: "true", validValues: ["true", "false"], scope: "deployType:installer" }
+  # Deploy_Installer_Enabled: 'true'
+
+## @mcp-section { name: "PS / DotNet Custom Deploy", description: "Deploys using a custom PowerShell script for .NET or other applications.", scope: "deployType:dotnet_custom", relatedTemplate: "ps-deploy.yaml" }
+    ####################################
+  ##      PS / DotNet Custom            ##
+############################################
+
+  ## @mcp { name: "Deploy_dotnet_custom", type: "string", required: false, description: "When 'true', enables custom PowerShell-based deployment for .NET applications.", example: "true", validValues: ["true", "false"], scope: "deployType:dotnet_custom" }
+  # Deploy_dotnet_custom: 'true'

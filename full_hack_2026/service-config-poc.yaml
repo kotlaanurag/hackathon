@@ -1,0 +1,735 @@
+# @mcp-schema: service-config-env
+# @mcp-version: 3.0
+# @mcp-description: >
+#   Per-environment service configuration template for the Everest DevOps Pipeline-as-Code framework.
+#   Users copy this file to their ServiceConfig repo as 'service-config-{env}.yaml' (e.g., service-config-dev.yaml)
+#   and set environment-specific values such as ARM connections, server names, and resource identifiers.
+#   Variables here override or supplement the pipeline-level service-config.yaml for a specific environment.
+# @mcp-usage: >
+#   1. Copy this file as service-config-dev.yaml, service-config-qa.yaml, service-config-stage.yaml, service-config-prod.yaml, service-config-dr.yaml
+#   2. Uncomment and set values specific to each environment
+#   3. These variables are loaded during the CD (deploy) stage for the matching environment
+#   4. Common pattern: ARM_Service_Connection varies per environment, Deploy_* resources vary per environment
+#   5. Only uncomment sections relevant to your Deploy_*_Enabled flags in service-config.yaml
+# @mcp-precedence: >
+#   Values in this file override values in service-config.yaml for the same key during the matching environment's deployment.
+#   Underscore-prefixed variables (_appRoot, _SASTTesting, etc.) are set by the pipeline framework and should NOT be overridden here.
+# @mcp-environments: [Dev, QA, Stage, Prod, DR]
+# @mcp-relatedFiles:
+#   - Service-Config-Template.yaml (pipeline-level config with Deploy_*_Enabled flags and global settings)
+#   - PipelineTemplate.yaml (pipeline definition that consumes this config)
+#   - CD: templates/main-azure-pipeline.yaml@cdtemplates
+
+variables:
+#############################################################################################################################################################
+###                                                    SECTION 1: Shared / Cross-Deploy-Type                                                              ###
+#############################################################################################################################################################
+
+## @mcp-section { name: "ARM Service Connection", description: "Azure Resource Manager service connection for ARM-based deployments. Used by ADF, Logic Apps, Web Apps, Functions, Terraform, Azure Copy, and others. Also often doubles as the Resource Group name.", scope: "deployType:adf|deployType:webapp|deployType:functions|deployType:logicapp|deployType:terraform|deployType:azcopy" }
+    #########################
+  ##   ARM Based Deployment  ##
+#################################
+
+  ## @mcp { name: "ARM_Service_Connection", type: "string", required: true, description: "Azure DevOps service connection name for ARM deployments. Also typically used as the Resource Group name. Must be configured per environment.", example: "MyApp-Dev-RG", scope: "env" }
+  # ARM_Service_Connection: 'MyApp-Dev-RG'
+
+## @mcp-section { name: "Service Actions Targets", description: "Per-environment target server hostnames for Windows service start/stop/restart operations. The service names are set globally in service-config.yaml; the targets vary per environment.", scope: "env" }
+    ##################################
+  ##     Service Actions Targets      ##
+##########################################
+
+  ## @mcp { name: "PreDeploy_Stop_Service_Target", type: "string", required: false, description: "Target server hostname for pre-deploy service stop.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PreDeploy_Stop_Service_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "PreDeploy_Restart_Service_Target", type: "string", required: false, description: "Target server hostname for pre-deploy service restart.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PreDeploy_Restart_Service_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "PostDeploy_Start_Service_Target", type: "string", required: false, description: "Target server hostname for post-deploy service start.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PostDeploy_Start_Service_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "PostDeploy_Restart_Service_Target", type: "string", required: false, description: "Target server hostname for post-deploy service restart.", example: "MYSERVER01.domain.net", scope: "env" }
+  # PostDeploy_Restart_Service_Target: 'MYSERVER01.domain.net'
+
+## @mcp-section { name: "Config Updates (Per-Env)", description: "Per-environment KeyVault and secret settings for configuration file updates. Requires Deploy_Config_Updates='true' in service-config.yaml.", scope: "env", relatedTemplate: "config-updates.yaml" }
+    ####################################
+  ##     Config Updates (Per-Env)      ##
+############################################
+
+  ## @mcp { name: "Deploy_Config_Updates_KeyVault", type: "string", required: false, description: "Azure KeyVault name for retrieving deployment secrets in this environment.", example: "ERDevOps-KeyVault", scope: "env" }
+  # Deploy_Config_Updates_KeyVault: 'ERDevOps-KeyVault'
+
+  ## @mcp { name: "Deploy_Config_Updates_Subscription", type: "string", required: false, description: "Azure subscription or service connection name for KeyVault access in this environment.", example: "ERDevOps-KeyVault", scope: "env" }
+  # Deploy_Config_Updates_Subscription: 'ERDevOps-KeyVault'
+
+  ## @mcp { name: "Deploy_Config_Updates_Secrets", type: "string", required: false, description: "Comma-separated list of KeyVault secret names to retrieve for config updates.", example: "IntegrationCertDev,IntegrationMicrosoftclientid-Dev", scope: "env" }
+  # Deploy_Config_Updates_Secrets: 'IntegrationCertDev,IntegrationMicrosoftclientid-Dev'
+
+  ## @mcp { name: "Deploy_Config_Updates_Source", type: "string", required: false, description: "Path to the properties/config file to update with secrets.", example: "$(Pipeline.Workspace)/drop/DEV/Override.properties", scope: "env" }
+  # Deploy_Config_Updates_Source: '$(Pipeline.Workspace)/drop/DEV/Override.properties'
+
+  ## @mcp { name: "Deploy_Config_Updates_KeyValues", type: "string", required: false, description: "Key-value mappings for config updates. Format depends on Deploy_Config_Updates_Type in service-config.yaml.", example: "$(@(\"key1=$(SecretName1)\",\"key2=$(SecretName2)\"))", scope: "env" }
+  # Deploy_Config_Updates_KeyValues: '$(@("key1=$(SecretName1)","key2=$(SecretName2)"))'
+
+## @mcp-section { name: "File Transform (Per-Env)", description: "Per-environment settings for file transformation during deployment. Requires Deploy_File_Transform_Enabled='true' in service-config.yaml.", scope: "env", relatedTemplate: "file-transform.yaml" }
+    ####################################
+  ##     File Transform (Per-Env)      ##
+############################################
+
+  ## @mcp { name: "Deploy_File_Transform_Overrides", type: "string", required: false, description: "XML/JSON variable substitution overrides for this environment.", example: "-ConnectionStrings.DefaultConnection \"Server=dev-sql;Database=MyDB\"", scope: "env" }
+  # Deploy_File_Transform_Overrides: ''
+
+  ## @mcp { name: "Deploy_File_Transform_KeyVault", type: "string", required: false, description: "Primary KeyVault name for file transform secrets.", example: "kv-myapp-dev", scope: "env" }
+  # Deploy_File_Transform_KeyVault: ''
+
+  ## @mcp { name: "Deploy_File_Transform_Subscription", type: "string", required: false, description: "Azure subscription/service connection for the primary file transform KeyVault.", example: "MyApp-Dev-RG", scope: "env" }
+  # Deploy_File_Transform_Subscription: ''
+
+  ## @mcp { name: "Deploy_File_Transform_Secrets", type: "string", required: false, description: "Comma-separated list of secrets from the primary KeyVault.", example: "db-password,api-key", scope: "env" }
+  # Deploy_File_Transform_Secrets: ''
+
+  ## @mcp { name: "Deploy_File_Transform_KeyVault_0", type: "string", required: false, description: "Secondary KeyVault name for additional file transform secrets.", example: "kv-shared-dev", scope: "env" }
+  # Deploy_File_Transform_KeyVault_0: ''
+
+  ## @mcp { name: "Deploy_File_Transform_Subscription_0", type: "string", required: false, description: "Azure subscription/service connection for the secondary file transform KeyVault.", example: "SharedServices-Dev-RG", scope: "env" }
+  # Deploy_File_Transform_Subscription_0: ''
+
+  ## @mcp { name: "Deploy_File_Transform_Secrets_0", type: "string", required: false, description: "Comma-separated list of secrets from the secondary KeyVault.", example: "shared-cert,shared-key", scope: "env" }
+  # Deploy_File_Transform_Secrets_0: ''
+
+  ## @mcp { name: "Deploy_File_Transform_KeyVault_1", type: "string", required: false, description: "Tertiary KeyVault name for additional file transform secrets.", example: "kv-infra-dev", scope: "env" }
+  # Deploy_File_Transform_KeyVault_1: ''
+
+  ## @mcp { name: "Deploy_File_Transform_Subscription_1", type: "string", required: false, description: "Azure subscription/service connection for the tertiary file transform KeyVault.", example: "Infra-Dev-RG", scope: "env" }
+  # Deploy_File_Transform_Subscription_1: ''
+
+  ## @mcp { name: "Deploy_File_Transform_Secrets_1", type: "string", required: false, description: "Comma-separated list of secrets from the tertiary KeyVault.", example: "infra-cert,infra-token", scope: "env" }
+  # Deploy_File_Transform_Secrets_1: ''
+
+## @mcp-section { name: "Replace Tokens (Per-Env)", description: "Per-environment settings for token replacement. Requires Deploy_ReplaceToken_Enabled='true' in service-config.yaml.", scope: "env" }
+    ####################################
+  ##     Replace Tokens (Per-Env)      ##
+############################################
+
+  ## @mcp { name: "Pre_Deploy_Workingdir", type: "string", required: false, description: "Root directory for token replacement file search.", example: "$(System.DefaultWorkingDirectory)", default: "$(System.DefaultWorkingDirectory)", scope: "env" }
+  # Pre_Deploy_Workingdir: '$(System.DefaultWorkingDirectory)'
+
+  ## @mcp { name: "Pre_Deploy_ReplaceTokensPath", type: "string", required: false, description: "Glob pattern for files to apply token replacement to.", example: "**/*.config", scope: "env" }
+  # Pre_Deploy_ReplaceTokensPath: '**/*.config'
+
+## @mcp-section { name: "Database Backup", description: "Pre-deployment database backup configuration per environment. Requires PreDeploy_DatabaseBackup_Enabled in service-config.yaml.", scope: "env", relatedTemplate: "sql-backup.yaml" }
+    #########################
+  ##     Database Backup     ##
+#################################
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_Enabled", type: "string", required: false, description: "When 'true', performs a database backup before deployment in this environment.", example: "true", validValues: ["true", "false"], default: "false", scope: "env" }
+  # PreDeploy_DatabaseBackup_Enabled: 'true'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_Server", type: "string", required: false, description: "SQL Server hostname for the backup.", example: "ENAZGWPCSQLS1.everestre.net", scope: "env" }
+  # PreDeploy_DatabaseBackup_Server: 'ENAZGWPCSQLS1.everestre.net'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_Databases", type: "string", required: false, description: "Comma-separated database name(s) to back up.", example: "PolicyCenter,ClaimCenter", scope: "env" }
+  # PreDeploy_DatabaseBackup_Databases: 'PolicyCenter'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_FilePath", type: "string", required: false, description: "Backup file path on the SQL server.", example: "E:\\Backup\\CICD\\", scope: "env" }
+  # PreDeploy_DatabaseBackup_FilePath: 'E:\Backup\CICD\'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_CopyOnly", type: "string", required: false, description: "When 'true', performs a copy-only backup (no effect on backup chain).", example: "true", validValues: ["true", "false"], default: "true", scope: "env" }
+  # PreDeploy_DatabaseBackup_CopyOnly: 'true'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_DBCheck", type: "string", required: false, description: "When 'true', runs DBCC CHECKDB before backup.", example: "true", validValues: ["true", "false"], default: "true", scope: "env" }
+  # PreDeploy_DatabaseBackup_DBCheck: 'true'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_Timeout", type: "string", required: false, description: "Timeout in seconds for the backup operation.", example: "1200", default: "1200", scope: "env" }
+  # PreDeploy_DatabaseBackup_Timeout: '1200'
+
+  ## @mcp { name: "PreDeploy_DatabaseBackup_Compress", type: "string", required: false, description: "Backup compression option.", example: "Compress", validValues: ["Compress", "NoCompress"], default: "Compress", scope: "env" }
+  # PreDeploy_DatabaseBackup_Compress: 'Compress'
+
+## @mcp-section { name: "Multi Deploy Overrides", description: "Per-environment parallel multi-node deployment configuration. Each line defines variable overrides for one parallel deployment job. Requires Multi_Deploy_Enabled='true' in service-config.yaml.", scope: "env" }
+    ###################################
+  ##      Multi Deploy Overrides      ##
+#########################################
+
+  ## @mcp { name: "Multi_Deploy_Overrides", type: "multiline", required: false, description: "Pipe-delimited list of variable overrides per deployment node. First key=value pair's value becomes the job display name. Each line runs as a separate parallel job.", example: "Node=Server1|Deploy_GWPC_TomCatServer=ENGWPCBTS1.everestre.net", scope: "env" }
+  # Multi_Deploy_Overrides: |-
+  #   Node=BT1|Deploy_GWPC_TomCatServer=ENGWPCBTS1.everestre.net
+  #   Node=BT2|Deploy_GWPC_TomCatServer=ENGWPCBTS2.everestre.net
+  #   Node=AP1|Deploy_GWPC_TomCatServer=ENGWPCAPS1.everestre.net
+  #   Node=AP2|Deploy_GWPC_TomCatServer=ENGWPCAPS2.everestre.net
+
+#############################################################################################################################################################
+###                                                    SECTION 2: Per-Environment Deploy Settings                                                         ###
+#############################################################################################################################################################
+
+## @mcp-section { name: "AKS Deploy", description: "Per-environment AKS cluster targeting. Cluster name determines blue/green color and region automatically.", scope: "deployType:aks", relatedTemplate: "aks-deploy.yaml" }
+    #########################
+  ##           AKS           ##
+#################################
+
+  ## @mcp { name: "Deploy_Aks_ClusterName", type: "string", required: true, description: "AKS cluster name for this environment. Region is auto-detected from the name pattern (caas-*-uk-*, caas-*-ind-*, default US). Blue/green color is auto-resolved via color endpoint.", example: "caas-green-dev", scope: "env" }
+  # Deploy_Aks_ClusterName: 'caas-green-dev'
+
+  ## @mcp { name: "Deploy_Aks_Namespace", type: "string", required: true, description: "Kubernetes namespace for the Helm release. If empty, defaults to '{environment}-{ApplicationName}'.", example: "dev-myapp", scope: "env" }
+  # Deploy_Aks_Namespace: 'dev-myapp'
+
+  ## @mcp { name: "Deploy_Aks_Args", type: "string", required: false, description: "Additional Helm arguments for AKS deployment. Ideal for --set and --set-string overrides per environment.", example: "--set replicaCount=2 --set ingress.host=myapp-dev.everestre.net", scope: "env" }
+  # Deploy_Aks_Args: ''
+
+  ## @mcp { name: "Deploy_Aks_Args_KeyVaultSub", type: "string", required: false, description: "Azure subscription containing the Key Vault used for Helm --set argument secret injection.", example: "10a0700e-a76a-462c-a11c-9af0bd677313", scope: "env" }
+  # Deploy_Aks_Args_KeyVaultSub: ''
+
+  ## @mcp { name: "Deploy_Aks_Args_KeyVaultName", type: "string", required: false, description: "Key Vault name containing secrets to inject as Helm --set arguments.", example: "kv-myapp-dev", scope: "env" }
+  # Deploy_Aks_Args_KeyVaultName: ''
+
+  ## @mcp { name: "Deploy_Aks_Args_KeyVaultSecrets", type: "string", required: false, description: "Comma-delimited list of Key Vault secret names to retrieve and inject as Helm --set arguments.", example: "db-password,api-key,redis-connection", scope: "env" }
+  # Deploy_Aks_Args_KeyVaultSecrets: ''
+
+## @mcp-section { name: "ADF Deploy", description: "Per-environment Azure Data Factory deployment settings.", scope: "deployType:adf", relatedTemplate: "adf-deploy.yaml" }
+    #########################
+  ##           ADF           ##
+#################################
+
+  ## @mcp { name: "Deploy_ADF_DevName", type: "string", required: true, description: "Source (development) Data Factory name to replace in ARM template.", example: "erazmyappadfd1", scope: "env" }
+  # Deploy_ADF_DevName: 'erazmyappadfd1'
+
+  ## @mcp { name: "Deploy_ADF_Name", type: "string", required: true, description: "Target Data Factory name for this environment.", example: "erazmyappadfq1", scope: "env" }
+  # Deploy_ADF_Name: 'erazmyappadfq1'
+
+  ## @mcp { name: "Deploy_ADF_DevIRName", type: "string", required: true, description: "Development Integration Runtime name to replace in ARM template.", example: "myapp-adf-dev-ir", scope: "env" }
+  # Deploy_ADF_DevIRName: 'myapp-adf-dev-ir'
+
+  ## @mcp { name: "Deploy_ADF_IRName", type: "string", required: true, description: "Target Integration Runtime name for this environment.", example: "myapp-adf-qa-ir", scope: "env" }
+  # Deploy_ADF_IRName: 'myapp-adf-qa-ir'
+
+  ## @mcp { name: "Deploy_ADF_Subscription", type: "string", required: true, description: "Azure subscription GUID for this environment's ADF.", example: "10a0700e-a76a-462c-a11c-9af0bd677313", scope: "env" }
+  # Deploy_ADF_Subscription: '10a0700e-a76a-462c-a11c-9af0bd677313'
+
+  ## @mcp { name: "Deploy_ADF_Location", type: "string", required: false, description: "Azure region/location of the target ADF resource group.", example: "East US 2", default: "East US 2", scope: "env" }
+  # Deploy_ADF_Location: 'East US 2'
+
+## @mcp-section { name: "ESB Deploy", description: "Per-environment ESB deployment settings including node count.", scope: "deployType:esb", relatedTemplate: "esb-deploy.yaml" }
+    #########################
+  ##           ESB           ##
+#################################
+
+  ## @mcp { name: "Deploy_ESB_Node_Count", type: "string", required: true, description: "Number of ESB deployment nodes for this environment.", example: "3", scope: "env" }
+  # Deploy_ESB_Node_Count: '1'
+
+## @mcp-section { name: "Terraform Deploy", description: "Per-environment Terraform state backend and service connection settings.", scope: "deployType:terraform", relatedTemplate: "terraform-deploy.yaml" }
+    ##########################
+  ##         Terraform        ##
+##################################
+
+  ## @mcp { name: "Deploy_TF_AzServiceConnection", type: "string", required: true, description: "Azure DevOps service connection for Terraform provider auth in this environment.", example: "EverestAPIM-Dev-RG", scope: "env" }
+  # Deploy_TF_AzServiceConnection: 'EverestAPIM-Dev-RG'
+
+  ## @mcp { name: "Deploy_TF_ResourcegrpName", type: "string", required: false, description: "Azure Resource Group for Terraform state storage.", example: "EverestAPIM-Dev-RG", scope: "env" }
+  # Deploy_TF_ResourcegrpName: 'EverestAPIM-Dev-RG'
+
+  ## @mcp { name: "Deploy_TF_StorageActName", type: "string", required: true, description: "Azure Storage Account name for Terraform remote state.", example: "usapimterraformstated1", scope: "env" }
+  # Deploy_TF_StorageActName: 'usapimterraformstated1'
+
+  ## @mcp { name: "Deploy_TF_StorageContainerName", type: "string", required: true, description: "Azure Blob container name for Terraform state file.", example: "apidevopsdevstatecontainer", scope: "env" }
+  # Deploy_TF_StorageContainerName: 'apidevopsdevstatecontainer'
+
+## @mcp-section { name: "Terragrunt Deploy", description: "Per-environment Terragrunt IaC deployment settings including state backend and multi-region/division targeting.", scope: "deployType:terragrunt", relatedTemplate: "iac-terragrunt-deploy.yaml" }
+    #############################
+  ##         Terragrunt          ##
+#####################################
+
+  ## @mcp { name: "Deploy_TG_AzServiceConnection", type: "string", required: true, description: "Azure DevOps service connection for Terragrunt provider auth.", example: "MyInfra-Dev-RG", scope: "env" }
+  # Deploy_TG_AzServiceConnection: 'MyInfra-Dev-RG'
+
+  ## @mcp { name: "Deploy_TG_StateFileSubscriptionId", type: "string", required: true, description: "Azure subscription GUID where Terraform state storage account resides.", example: "10a0700e-a76a-462c-a11c-9af0bd677313", scope: "env" }
+  # Deploy_TG_StateFileSubscriptionId: '10a0700e-a76a-462c-a11c-9af0bd677313'
+
+  ## @mcp { name: "Deploy_TG_StateFileRG", type: "string", required: true, description: "Resource Group name containing the state storage account.", example: "rg-terraform-state-dev", scope: "env" }
+  # Deploy_TG_StateFileRG: 'rg-terraform-state-dev'
+
+  ## @mcp { name: "Deploy_TG_StateFileName", type: "string", required: true, description: "Terraform state file name in remote backend.", example: "terraform.tfstate", scope: "env" }
+  # Deploy_TG_StateFileName: 'terraform.tfstate'
+
+  ## @mcp { name: "Deploy_TG_StorageActName", type: "string", required: true, description: "Azure Storage Account name for Terragrunt remote state.", example: "sttfstatedev01", scope: "env" }
+  # Deploy_TG_StorageActName: 'sttfstatedev01'
+
+  ## @mcp { name: "Deploy_TG_StorageContainerName", type: "string", required: true, description: "Azure Blob container name for Terragrunt state file.", example: "tfstate", scope: "env" }
+  # Deploy_TG_StorageContainerName: 'tfstate'
+
+  ## @mcp { name: "Deploy_TG_Environment", type: "string", required: true, description: "Terragrunt environment identifier used in folder path resolution.", example: "dev", scope: "env" }
+  # Deploy_TG_Environment: 'dev'
+
+  ## @mcp { name: "Deploy_TG_Region", type: "string", required: true, description: "Terragrunt region identifier used in folder path resolution.", example: "eastus2", scope: "env" }
+  # Deploy_TG_Region: 'eastus2'
+
+  ## @mcp { name: "Apply_TG_Enabled", type: "string", required: false, description: "When 'true', applies Terragrunt changes (vs. plan-only). Default 'true'.", example: "true", validValues: ["true", "false"], default: "true", scope: "env" }
+  # Apply_TG_Enabled: 'true'
+
+## @mcp-section { name: "Web App Deploy", description: "Per-environment Azure Web App deployment settings. Requires Deploy_WebApp_Enabled='true' in service-config.yaml.", scope: "deployType:webapp", relatedTemplate: "azure-app-deploy.yaml" }
+    #############################
+  ##           Web App           ##
+#####################################
+
+  ## @mcp { name: "Deploy_WebApp_Name", type: "string", required: true, description: "Azure App Service name for this environment.", example: "myapp-webapp-dev", scope: "env" }
+  # Deploy_WebApp_Name: 'myapp-webapp-dev'
+
+  ## @mcp { name: "Deploy_WebApp_Deploy_PackagePath", type: "string", required: false, description: "Path to the deployment package for this environment.", example: "$(Pipeline.Workspace)/drop/*.zip", default: "$(Pipeline.Workspace)/drop/*.zip", scope: "env" }
+  # Deploy_WebApp_Deploy_PackagePath: '$(Pipeline.Workspace)/drop/*.zip'
+
+  ## @mcp { name: "Deploy_WebApp_Type", type: "string", required: false, description: "Azure App Service type.", example: "webAppLinux", validValues: ["webApp", "webAppLinux", "webAppContainer"], default: "webApp", scope: "env" }
+  # Deploy_WebApp_Type: 'webApp'
+
+  ## @mcp { name: "Deploy_WebApp_Stack", type: "string", required: false, description: "Runtime stack for Linux web apps.", example: "PYTHON|3.11", scope: "env" }
+  # Deploy_WebApp_Stack: ''
+
+  ## @mcp { name: "Deploy_WebApp_Startup", type: "string", required: false, description: "Startup command for the web app.", example: "streamlit run app.py", scope: "env" }
+  # Deploy_WebApp_Startup: ''
+
+  ## @mcp { name: "Deploy_WebApp_AppSettings", type: "string", required: false, description: "App settings to set on the Web App. Format: -key1 value1 -key2 value2.", example: "-WEBSITE_NODE_DEFAULT_VERSION 18-lts", scope: "env" }
+  # Deploy_WebApp_AppSettings: ''
+
+  ## @mcp { name: "Deploy_WebApp_Configs", type: "string", required: false, description: "Additional configuration settings for the Web App.", example: "-phpVersion off", scope: "env" }
+  # Deploy_WebApp_Configs: ''
+
+  ## @mcp { name: "Deploy_WebApp_VirtualApplication", type: "string", required: false, description: "Virtual application path.", example: "/", default: "/", scope: "env" }
+  # Deploy_WebApp_VirtualApplication: '/'
+
+  ## @mcp { name: "Deploy_WebApp_Deploy_Type", type: "string", required: false, description: "Deployment method.", example: "zipDeploy", validValues: ["zipDeploy", "webDeploy", "runFromPackage", "war"], default: "zipDeploy", scope: "env" }
+  # Deploy_WebApp_Deploy_Type: 'zipDeploy'
+
+  ## @mcp { name: "Deploy_WebApp_UseWebDeploy", type: "string", required: false, description: "When 'true', uses WebDeploy.", example: "false", validValues: ["true", "false"], default: "false", scope: "env" }
+  # Deploy_WebApp_UseWebDeploy: 'false'
+
+  ## @mcp { name: "Deploy_WebApp_Restart", type: "string", required: false, description: "When 'true', restarts the web app after deployment.", example: "true", validValues: ["true", "false"], default: "false", scope: "env" }
+  # Deploy_WebApp_Restart: 'false'
+
+  ## @mcp { name: "Deploy_WebApp_Script", type: "string", required: false, description: "Post-deployment script type.", example: "Inline Script", validValues: ["Inline Script", "File Path"], scope: "env" }
+  # Deploy_WebApp_Script: ''
+
+  ## @mcp { name: "Deploy_WebApp_Inline", type: "string", required: false, description: "Inline script content for post-deployment.", example: "echo 'Deployment complete'", scope: "env" }
+  # Deploy_WebApp_Inline: ''
+
+  ## @mcp { name: "Deploy_WebApp_ScriptPath", type: "string", required: false, description: "File path to post-deployment script.", example: "$(Pipeline.Workspace)/drop/deploy.ps1", scope: "env" }
+  # Deploy_WebApp_ScriptPath: ''
+
+  ## @mcp { name: "Deploy_WebApp_Docker_Namespace", type: "string", required: false, description: "Docker namespace for container-based Web App deployment.", example: "myacr.azurecr.io", scope: "env" }
+  # Deploy_WebApp_Docker_Namespace: ''
+
+  ## @mcp { name: "Deploy_WebApp_Docker_Repo", type: "string", required: false, description: "Docker repository name for container-based Web App deployment.", example: "myapp", scope: "env" }
+  # Deploy_WebApp_Docker_Repo: ''
+
+  ## @mcp { name: "Deploy_WebApp_Docker_Tag", type: "string", required: false, description: "Docker image tag for container-based Web App deployment.", example: "$(Build.BuildNumber)", scope: "env" }
+  # Deploy_WebApp_Docker_Tag: ''
+
+## @mcp-section { name: "Functions Deploy", description: "Per-environment Azure Functions deployment settings. Requires Deploy_Functions_Enabled='true' in service-config.yaml.", scope: "deployType:functions", relatedTemplate: "azure-functions-deploy.yaml" }
+    ###############################
+  ##           Functions           ##
+#######################################
+
+  ## @mcp { name: "Deploy_Functions_Name", type: "string", required: true, description: "Azure Function App name for this environment.", example: "myapp-func-dev", scope: "env" }
+  # Deploy_Functions_Name: 'myapp-func-dev'
+
+  ## @mcp { name: "Deploy_Functions_Type", type: "string", required: false, description: "Azure Function App type.", example: "functionAppLinux", validValues: ["functionApp", "functionAppLinux"], default: "functionApp", scope: "env" }
+  # Deploy_Functions_Type: 'functionApp'
+
+  ## @mcp { name: "Deploy_Functions_Stack", type: "string", required: true, description: "Function App runtime stack.", example: "PYTHON|3.11", validValues: ["DOTNET|6.0", "DOTNET-ISOLATED|6.0", "DOTNET-ISOLATED|7.0", "DOTNET-ISOLATED|8.0", "JAVA|8", "JAVA|11", "JAVA|17", "JAVA|21", "NODE|14", "NODE|16", "NODE|18", "NODE|20", "PYTHON|3.8", "PYTHON|3.9", "PYTHON|3.10", "PYTHON|3.11"], scope: "env" }
+  # Deploy_Functions_Stack: 'PYTHON|3.11'
+
+  ## @mcp { name: "Deploy_Functions_Package", type: "string", required: false, description: "Path to the deployment package.", example: "$(Pipeline.Workspace)/drop", default: "$(Pipeline.Workspace)/drop", scope: "env" }
+  # Deploy_Functions_Package: '$(Pipeline.Workspace)/drop'
+
+  ## @mcp { name: "Deploy_Functions_DeployType", type: "string", required: false, description: "Deployment method for Azure Functions.", example: "zipDeploy", validValues: ["zipDeploy", "runFromPackage"], default: "zipDeploy", scope: "env" }
+  # Deploy_Functions_DeployType: 'zipDeploy'
+
+  ## @mcp { name: "Deploy_Functions_AppSettings", type: "string", required: false, description: "App settings to set on the Function App. Format: -key1 value1 -key2 value2.", example: "-AzureWebJobsStorage $(StorageConnectionString)", scope: "env" }
+  # Deploy_Functions_AppSettings: ''
+
+## @mcp-section { name: "DACPAC Deploy", description: "Per-environment SQL DACPAC deployment settings. Requires Deploy_Dacpac_Enabled='true' in service-config.yaml.", scope: "deployType:dacpac", relatedTemplate: "dacpac-deploy.yaml" }
+    ###########################
+  ##          DACPAC           ##
+###################################
+
+  ## @mcp { name: "Deploy_Dacpac_Server", type: "string", required: true, description: "Target SQL Server hostname.", example: "myserver.database.windows.net", scope: "env" }
+  # Deploy_Dacpac_Server: 'myserver.database.windows.net'
+
+  ## @mcp { name: "Deploy_Dacpac_Database", type: "string", required: true, description: "Target database name.", example: "MyAppDB", scope: "env" }
+  # Deploy_Dacpac_Database: 'MyAppDB'
+
+  ## @mcp { name: "Deploy_Dacpac_User", type: "string", required: true, description: "SQL authentication username.", example: "deploy_user", scope: "env" }
+  # Deploy_Dacpac_User: 'deploy_user'
+
+  ## @mcp { name: "Deploy_Dacpac_Password", type: "string", required: true, description: "SQL authentication password. Use KeyVault secret reference.", example: "$(MyDB-Password)", scope: "env" }
+  # Deploy_Dacpac_Password: '$(MyDB-Password)'
+
+## @mcp-section { name: "IIS Deploy", description: "Per-environment IIS web server deployment settings. Requires Deploy_IIS_Enabled='true' in service-config.yaml.", scope: "deployType:iis", relatedTemplate: "IIS-Deploy.yaml" }
+    #########################
+  ##            IIS           ##
+#################################
+
+  ## @mcp { name: "Deploy_IIS_Server", type: "string", required: true, description: "Target IIS server hostname.", example: "MYWEBSERVER01.domain.net", scope: "env" }
+  # Deploy_IIS_Server: 'MYWEBSERVER01.domain.net'
+
+  ## @mcp { name: "Deploy_IIS_Website", type: "string", required: true, description: "IIS website name.", example: "Default Web Site", scope: "env" }
+  # Deploy_IIS_Website: 'Default Web Site'
+
+  ## @mcp { name: "Deploy_IIS_App", type: "string", required: true, description: "IIS application name under the website.", example: "MyWebApp", scope: "env" }
+  # Deploy_IIS_App: 'MyWebApp'
+
+  ## @mcp { name: "Deploy_IIS_TargetPath", type: "string", required: false, description: "Physical target path on the IIS server. If empty, uses the IIS application default.", example: "D$\\inetpub\\MyWebApp", scope: "env" }
+  # Deploy_IIS_TargetPath: ''
+
+  ## @mcp { name: "Deploy_IIS_Restart", type: "string", required: false, description: "When 'true', restarts IIS after deployment.", example: "true", validValues: ["true", "false"], default: "true", scope: "env" }
+  # Deploy_IIS_Restart: 'true'
+
+## @mcp-section { name: "File Deploy", description: "Per-environment file copy deployment settings. Requires Deploy_File_Enabled='true' in service-config.yaml.", scope: "deployType:file", relatedTemplate: "file-deploy.yaml" }
+    #########################
+  ##            File          ##
+#################################
+
+  ## @mcp { name: "Deploy_File_Target", type: "string", required: true, description: "Target server hostname.", example: "MYSERVER01.domain.net", scope: "env" }
+  # Deploy_File_Target: 'MYSERVER01.domain.net'
+
+  ## @mcp { name: "Deploy_File_Target_Path", type: "string", required: true, description: "UNC or local path on the target server.", example: "D$\\MyApp\\Deploy", scope: "env" }
+  # Deploy_File_Target_Path: 'D$\MyApp\Deploy'
+
+  ## @mcp { name: "Deploy_File_Target_Clean", type: "string", required: false, description: "When 'true', cleans the target directory before copying.", example: "false", validValues: ["true", "false"], default: "false", scope: "env" }
+  # Deploy_File_Target_Clean: 'false'
+
+## @mcp-section { name: "Logic App Deploy", description: "Per-environment Logic App deployment settings. Requires Deploy_LogicApp_Enabled='true' in service-config.yaml.", scope: "deployType:logicapp", relatedTemplate: "logicapp-deploy.yaml" }
+    #############################
+  ##          Logic App          ##
+#####################################
+
+  ## @mcp { name: "Deploy_LogicApp_Name", type: "string", required: true, description: "Logic App resource name for this environment.", example: "myapp-logicapp-dev", scope: "env" }
+  # Deploy_LogicApp_Name: 'myapp-logicapp-dev'
+
+  ## @mcp { name: "Deploy_LogicApp_ResourceGroup", type: "string", required: true, description: "Azure Resource Group for the Logic App.", example: "MyApp-Dev-RG", scope: "env" }
+  # Deploy_LogicApp_ResourceGroup: 'MyApp-Dev-RG'
+
+  ## @mcp { name: "Deploy_LogicApp_Subscription", type: "string", required: true, description: "Azure subscription GUID for the Logic App resource.", example: "10a0700e-a76a-462c-a11c-9af0bd677313", scope: "env" }
+  # Deploy_LogicApp_Subscription: '10a0700e-a76a-462c-a11c-9af0bd677313'
+
+  ## @mcp { name: "Deploy_LogicApp_Location", type: "string", required: false, description: "Azure region for the Logic App.", example: "East US 2", default: "East US 2", scope: "env" }
+  # Deploy_LogicApp_Location: 'East US 2'
+
+  ## @mcp { name: "Deploy_LogicApp_AppSettings", type: "string", required: false, description: "App settings string for Logic App configuration.", example: "-key1 value1", scope: "env" }
+  # Deploy_LogicApp_AppSettings: ''
+
+  ## @mcp { name: "Deploy_LogicApp_DBKeyVault_Secrets", type: "string", required: false, description: "Comma-separated list of DB KeyVault secrets for Logic App.", example: "db-connection-string,db-password", scope: "env" }
+  # Deploy_LogicApp_DBKeyVault_Secrets: ''
+
+  ## @mcp { name: "Deploy_LogicApp_AppKeyVault_Name", type: "string", required: false, description: "Primary app KeyVault name for Logic App secrets.", example: "kv-myapp-dev", scope: "env" }
+  # Deploy_LogicApp_AppKeyVault_Name: ''
+
+  ## @mcp { name: "Deploy_LogicApp_AppKeyVault_Subscription", type: "string", required: false, description: "Service connection for primary app KeyVault.", example: "MyApp-Dev-RG", scope: "env" }
+  # Deploy_LogicApp_AppKeyVault_Subscription: ''
+
+  ## @mcp { name: "Deploy_LogicApp_AppKeyVault_Secrets", type: "string", required: false, description: "Comma-separated secrets from primary app KeyVault.", example: "api-key,client-secret", scope: "env" }
+  # Deploy_LogicApp_AppKeyVault_Secrets: ''
+
+  ## @mcp { name: "Deploy_LogicApp_AppKeyVault_Name_2", type: "string", required: false, description: "Secondary app KeyVault name.", example: "kv-shared-dev", scope: "env" }
+  # Deploy_LogicApp_AppKeyVault_Name_2: ''
+
+  ## @mcp { name: "Deploy_LogicApp_AppKeyVault_Subscription_2", type: "string", required: false, description: "Service connection for secondary app KeyVault.", example: "SharedServices-Dev-RG", scope: "env" }
+  # Deploy_LogicApp_AppKeyVault_Subscription_2: ''
+
+  ## @mcp { name: "Deploy_LogicApp_AppKeyVault_Secrets_2", type: "string", required: false, description: "Comma-separated secrets from secondary app KeyVault.", example: "shared-cert,shared-key", scope: "env" }
+  # Deploy_LogicApp_AppKeyVault_Secrets_2: ''
+
+  ## @mcp { name: "Deploy_LogicApp_ARMParamOverrides", type: "string", required: false, description: "ARM template parameter overrides for Logic App deployment.", example: "-param1 value1 -param2 value2", scope: "env" }
+  # Deploy_LogicApp_ARMParamOverrides: ''
+
+## @mcp-section { name: "Guidewire PolicyCenter Deploy", description: "Per-environment Guidewire PolicyCenter/Tomcat deployment settings. Requires Deploy_GWPC_Enabled='true' in service-config.yaml.", scope: "deployType:gwpc", relatedTemplate: "policycenter-deploy.yaml" }
+    #########################
+  ##           GWPC          ##
+#################################
+
+  ## @mcp { name: "Deploy_GWPC_TomCatServer", type: "string", required: true, description: "Tomcat server hostname for PolicyCenter deployment.", example: "ENGWPCAPD3.everestre.net", scope: "env" }
+  # Deploy_GWPC_TomCatServer: 'ENGWPCAPD3.everestre.net'
+
+  ## @mcp { name: "Deploy_GWPC_TomCatService", type: "string", required: false, description: "Windows service name for the Tomcat instance.", example: "tomcat9", default: "tomcat9", scope: "env" }
+  # Deploy_GWPC_TomCatService: 'tomcat9'
+
+  ## @mcp { name: "Deploy_GWPC_WARTargetPath", type: "string", required: false, description: "Target path for WAR deployment on the Tomcat server.", example: "D:\\apache-tomcat-9.0.96\\webapps", default: "D:\\apache-tomcat-9.0.96\\webapps", scope: "env" }
+  # Deploy_GWPC_WARTargetPath: 'D:\apache-tomcat-9.0.96\webapps'
+
+## @mcp-section { name: "ClaimCenter Deploy", description: "Per-environment Guidewire ClaimCenter deployment settings. Requires Deploy_ClaimCenter_Enabled='true' in service-config.yaml.", scope: "deployType:claimcenter", relatedTemplate: "claimcenter-deploy.yaml" }
+    #################################
+  ##          ClaimCenter            ##
+#########################################
+
+  ## @mcp { name: "Deploy_ClaimCenter_Server", type: "string", required: true, description: "ClaimCenter server hostname.", example: "ENGWCCAPS1.everestre.net", scope: "env" }
+  # Deploy_ClaimCenter_Server: 'ENGWCCAPS1.everestre.net'
+
+  ## @mcp { name: "Deploy_File_Target_Path_CC", type: "string", required: true, description: "File path for ClaimCenter WAR deployment.", example: "D:\\apache-tomcat-cc\\webapps", scope: "env" }
+  # Deploy_File_Target_Path_CC: 'D:\apache-tomcat-cc\webapps'
+
+  ## @mcp { name: "Deploy_File_Target_Path_AB", type: "string", required: true, description: "File path for Application Bridge WAR deployment.", example: "D:\\apache-tomcat-ab\\webapps", scope: "env" }
+  # Deploy_File_Target_Path_AB: 'D:\apache-tomcat-ab\webapps'
+
+  ## @mcp { name: "Deploy_File_Target_Path_Zip", type: "string", required: true, description: "File path for ZIP artifact deployment.", example: "D:\\ClaimCenter\\artifacts", scope: "env" }
+  # Deploy_File_Target_Path_Zip: 'D:\ClaimCenter\artifacts'
+
+  ## @mcp { name: "Deploy_Tomcat_Name_CC", type: "string", required: true, description: "Tomcat service name for ClaimCenter.", example: "tomcat-cc", scope: "env" }
+  # Deploy_Tomcat_Name_CC: 'tomcat-cc'
+
+  ## @mcp { name: "Deploy_Tomcat_Name_AB", type: "string", required: true, description: "Tomcat service name for Application Bridge.", example: "tomcat-ab", scope: "env" }
+  # Deploy_Tomcat_Name_AB: 'tomcat-ab'
+
+## @mcp-section { name: "ClaimCenter International Deploy", description: "Per-environment ClaimCenter International deployment settings. Requires Deploy_ClaimCenterInt_Enabled='true' in service-config.yaml.", scope: "deployType:claimcenterint", relatedTemplate: "cc-int-deploy.yaml" }
+    #########################################
+  ##     ClaimCenter International           ##
+###############################################
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_EnvConfigFilePath", type: "string", required: false, description: "Path to environment-specific config file.", example: "config/qa.properties", scope: "env" }
+  # Deploy_ClaimCenterInt_EnvConfigFilePath: ''
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_AppServerName", type: "string", required: true, description: "Primary application server hostname.", example: "ENGWCCINTAPS1.everestre.net", scope: "env" }
+  # Deploy_ClaimCenterInt_AppServerName: ''
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_DRAppServerName", type: "string", required: false, description: "DR application server hostname (used during DR deployments).", example: "ENGWCCINTAPDR1.everestre.net", scope: "env" }
+  # Deploy_ClaimCenterInt_DRAppServerName: ''
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_ServerUserName", type: "string", required: true, description: "Server login username. Use KeyVault reference.", example: "$(CC-Server-User)", scope: "env" }
+  # Deploy_ClaimCenterInt_ServerUserName: ''
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_ServerPassword", type: "string", required: true, description: "Server login password. Use KeyVault reference.", example: "$(CC-Server-Password)", scope: "env" }
+  # Deploy_ClaimCenterInt_ServerPassword: ''
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_instanceName_ab", type: "string", required: false, description: "Application Bridge instance name.", example: "ab", default: "ab", scope: "env" }
+  # Deploy_ClaimCenterInt_instanceName_ab: 'ab'
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_instanceName_cc", type: "string", required: false, description: "ClaimCenter instance name.", example: "cc", default: "cc", scope: "env" }
+  # Deploy_ClaimCenterInt_instanceName_cc: 'cc'
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_gwPort_ab", type: "string", required: false, description: "Guidewire port for Application Bridge.", example: "8243", default: "8243", scope: "env" }
+  # Deploy_ClaimCenterInt_gwPort_ab: '8243'
+
+  ## @mcp { name: "Deploy_ClaimCenterInt_gwPort_cc", type: "string", required: false, description: "Guidewire port for ClaimCenter.", example: "8443", default: "8443", scope: "env" }
+  # Deploy_ClaimCenterInt_gwPort_cc: '8443'
+
+  ## @mcp { name: "Deploy_Keyvault_AzSubscription", type: "string", required: true, description: "Azure subscription/service connection for CC International KeyVault access.", example: "CCInt-Dev-RG", scope: "env" }
+  # Deploy_Keyvault_AzSubscription: ''
+
+  ## @mcp { name: "Deploy_Keyvault_Name", type: "string", required: true, description: "KeyVault name for CC International secrets.", example: "kv-ccint-dev", scope: "env" }
+  # Deploy_Keyvault_Name: ''
+
+  ## @mcp { name: "Deploy_DD_DestPath", type: "string", required: false, description: "Destination path for Data Dictionary deployment.", example: "D:\\DataDictionary\\", scope: "env" }
+  # Deploy_DD_DestPath: ''
+
+  ## @mcp { name: "Deploy_DD_DestFile", type: "string", required: false, description: "Destination file name for Data Dictionary.", example: "DataDictionary.xml", scope: "env" }
+  # Deploy_DD_DestFile: ''
+
+## @mcp-section { name: "IRCOM Deploy", description: "Per-environment IRCOM COM component deployment settings. Requires Deploy_IRCOM_Enabled='true' in service-config.yaml.", scope: "deployType:ircom", relatedTemplate: "ircom-deploy.yaml" }
+    ##########################
+  ##           IRCOM          ##
+##################################
+
+  ## @mcp { name: "Deploy_IRCOM_Server", type: "string", required: true, description: "Target server hostname for IRCOM component registration.", example: "MYCOMSERVER01.domain.net", scope: "env" }
+  # Deploy_IRCOM_Server: 'MYCOMSERVER01.domain.net'
+
+  ## @mcp { name: "Deploy_IRCOM_TargetPath", type: "string", required: false, description: "Target directory path for IRCOM DLLs on the server.", example: "E:\\ImageWrt\\dll\\bin\\Release", scope: "env" }
+  # Deploy_IRCOM_TargetPath: 'E:\ImageWrt\dll\bin\Release'
+
+## @mcp-section { name: "Sitecore Deploy", description: "Per-environment Sitecore CMS deployment settings. Requires Deploy_Sitecore='true' in service-config.yaml.", scope: "deployType:sitecore", relatedTemplate: "sitecore-deploy.yaml" }
+    ############################
+  ##          Sitecore          ##
+####################################
+
+  ## @mcp { name: "Deploy_Sitecore_AppName", type: "string", required: true, description: "Sitecore Azure App Service name for this environment.", example: "mysite-sc-dev", scope: "env" }
+  # Deploy_Sitecore_AppName: 'mysite-sc-dev'
+
+  ## @mcp { name: "Deploy_Sitecore_ARMConnection", type: "string", required: true, description: "ARM service connection for Sitecore deployment.", example: "MySitecore-Dev-RG", scope: "env" }
+  # Deploy_Sitecore_ARMConnection: 'MySitecore-Dev-RG'
+
+  ## @mcp { name: "Deploy_Sitecore_ServerRoles", type: "string", required: false, description: "Pipe-delimited Sitecore server roles to deploy.", example: "CD|CE", default: "CD|CE", scope: "env" }
+  # Deploy_Sitecore_ServerRoles: 'CD|CE'
+
+  ## @mcp { name: "Deploy_Sitecore_GraphId", type: "string", required: false, description: "Graph API client ID KeyVault secret name.", example: "GraphApp-ClientId-Dev", scope: "env" }
+  # Deploy_Sitecore_GraphId: 'GraphApp-ClientId-Dev'
+
+  ## @mcp { name: "Deploy_Sitecore_GraphSecret", type: "string", required: false, description: "Graph API client secret KeyVault secret name.", example: "GraphApp-ClientSecret-Dev", scope: "env" }
+  # Deploy_Sitecore_GraphSecret: 'GraphApp-ClientSecret-Dev'
+
+  ## @mcp { name: "Deploy_Sitecore_PwdFind", type: "string", required: false, description: "Password string to find and replace in Sitecore config files.", example: "CucaMon#23", scope: "env" }
+  # Deploy_Sitecore_PwdFind: ''
+
+  ## @mcp { name: "Deploy_Sitecore_PwdReplace", type: "string", required: false, description: "KeyVault secret name for the replacement password.", example: "Azure-SQL-Dev-sitecoreweb", scope: "env" }
+  # Deploy_Sitecore_PwdReplace: ''
+
+  ## @mcp { name: "Deploy_Sitecore_AppKeyVault_Subscription", type: "string", required: false, description: "Service connection for Sitecore app KeyVault.", example: "MySitecore-Dev-RG", scope: "env" }
+  # Deploy_Sitecore_AppKeyVault_Subscription: ''
+
+  ## @mcp { name: "Deploy_Sitecore_AppKeyVault_Name", type: "string", required: false, description: "KeyVault name for Sitecore application secrets.", example: "kv-sitecore-dev", scope: "env" }
+  # Deploy_Sitecore_AppKeyVault_Name: ''
+
+## @mcp-section { name: "GCP Cloud Run Deploy", description: "Per-environment Google Cloud Run deployment settings. Requires Deploy_CloudRun_Enabled='true' in service-config.yaml.", scope: "deployType:cloudrun", relatedTemplate: "gcp-cloudrun-deploy.yaml" }
+    ##################################
+  ##        GCP Cloud Run             ##
+##########################################
+
+  ## @mcp { name: "Deploy_CloudRun_ProjectName", type: "string", required: true, description: "GCP project name for Cloud Run deployment.", example: "everest-myapp-dev", scope: "env" }
+  # Deploy_CloudRun_ProjectName: 'everest-myapp-dev'
+
+  ## @mcp { name: "Deploy_CloudRun_Region", type: "string", required: false, description: "GCP region for Cloud Run service.", example: "us-east4", default: "us-east4", scope: "env" }
+  # Deploy_CloudRun_Region: 'us-east4'
+
+  ## @mcp { name: "Deploy_CloudRun_AzureServiceConnection", type: "string", required: true, description: "Azure DevOps service connection for GCP authentication (via Workload Identity Federation).", example: "GCP-MyApp-Dev", scope: "env" }
+  # Deploy_CloudRun_AzureServiceConnection: 'GCP-MyApp-Dev'
+
+  ## @mcp { name: "Deploy_CloudRun_ClientCredentialConfigPath", type: "string", required: false, description: "Secure file name for GCP client credential config.", example: "GCPclientLibraryConfig", default: "GCPclientLibraryConfig", scope: "env" }
+  # Deploy_CloudRun_ClientCredentialConfigPath: 'GCPclientLibraryConfig'
+
+## @mcp-section { name: "Dash Deploy", description: "Per-environment Dash/Plotly application deployment settings. Requires Deploy_Dash_Enabled='true' in service-config.yaml.", scope: "deployType:dash", relatedTemplate: "dash-deploy.yaml" }
+    #########################
+  ##           Dash          ##
+#################################
+
+  ## @mcp { name: "Deploy_Dash_Server", type: "string", required: true, description: "Target Dash/Plotly server hostname.", example: "MYDASHSERVER01.domain.net", scope: "env" }
+  # Deploy_Dash_Server: 'MYDASHSERVER01.domain.net'
+
+  ## @mcp { name: "Deploy_Dash_ClientId", type: "string", required: true, description: "Azure AD client ID for Dash server authentication.", example: "$(DashClientId-Dev)", scope: "env" }
+  # Deploy_Dash_ClientId: ''
+
+  ## @mcp { name: "Deploy_Dash_User", type: "string", required: true, description: "Dash deployment username.", example: "deploy_user", scope: "env" }
+  # Deploy_Dash_User: ''
+
+  ## @mcp { name: "Deploy_Dash_Password", type: "string", required: true, description: "Dash deployment password. Use KeyVault secret reference.", example: "$(DashPassword-Dev)", scope: "env" }
+  # Deploy_Dash_Password: ''
+
+## @mcp-section { name: "MLOps Deploy", description: "Per-environment Databricks MLOps workflow deployment settings. Requires Deploy_MLOps_Enabled='true' in service-config.yaml.", scope: "deployType:mlops", relatedTemplate: "mlops-deploy.yaml" }
+    ##########################
+  ##           MLOps          ##
+##################################
+
+  ## @mcp { name: "Deploy_MLOps_Host", type: "string", required: true, description: "Databricks workspace host URL for MLOps workflow deployment.", example: "https://adb-1234567890.12.azuredatabricks.net", scope: "env" }
+  # Deploy_MLOps_Host: 'https://adb-1234567890.12.azuredatabricks.net'
+
+## @mcp-section { name: "MLOps Model Deploy", description: "Per-environment ML model deployment settings. Requires Deploy_MLOps_Model_Enabled='true' in service-config.yaml.", scope: "deployType:mlopsmodel", relatedTemplate: "mlops-model-deploy.yaml" }
+    ##################################
+  ##        MLOps Model               ##
+##########################################
+
+  ## @mcp { name: "Deploy_MLOpsModel_Host", type: "string", required: true, description: "Databricks workspace host URL for model deployment.", example: "https://adb-1234567890.12.azuredatabricks.net", scope: "env" }
+  # Deploy_MLOpsModel_Host: 'https://adb-1234567890.12.azuredatabricks.net'
+
+  ## @mcp { name: "Deploy_MLOpsModel_Endpoint_Name", type: "string", required: true, description: "Databricks model serving endpoint name.", example: "myapp-model-endpoint-dev", scope: "env" }
+  # Deploy_MLOpsModel_Endpoint_Name: 'myapp-model-endpoint-dev'
+
+  ## @mcp { name: "Deploy_MLOpsModel_Endpoint_Table_Name", type: "string", required: true, description: "Databricks inference table name for the model endpoint.", example: "default.myapp_predictions_dev", scope: "env" }
+  # Deploy_MLOpsModel_Endpoint_Table_Name: 'default.myapp_predictions_dev'
+
+## @mcp-section { name: "ADB Actions Deploy", description: "Per-environment Databricks deployment action settings. Requires Deploy_ADBAction_Enabled='true' in service-config.yaml.", scope: "deployType:adbaction", relatedTemplate: "adb-adbactions.yaml" }
+    ##################################
+  ##        ADB Actions               ##
+##########################################
+
+  ## @mcp { name: "Deploy_ADBAction_Instance", type: "string", required: true, description: "Databricks workspace URL for this environment.", example: "https://adb-1234567890.12.azuredatabricks.net", scope: "env" }
+  # Deploy_ADBAction_Instance: 'https://adb-1234567890.12.azuredatabricks.net'
+
+  ## @mcp { name: "Deploy_ADBAction_ClientId", type: "string", required: true, description: "Azure AD client ID for Databricks SPN authentication. Use KeyVault secret reference.", example: "$(ADB-ClientId-Dev)", scope: "env" }
+  # Deploy_ADBAction_ClientId: ''
+
+  ## @mcp { name: "Deploy_ADBAction_Secret", type: "string", required: true, description: "Azure AD client secret for Databricks SPN authentication. Use KeyVault secret reference.", example: "$(ADB-Secret-Dev)", scope: "env" }
+  # Deploy_ADBAction_Secret: ''
+
+## @mcp-section { name: "Azure Copy Deploy", description: "Per-environment Azure Copy (AzCopy) deployment settings. Requires Deploy_Az_Copy_Enabled='true' in service-config.yaml.", scope: "deployType:azcopy", relatedTemplate: "az-copy-deploy.yaml" }
+    ##################################
+  ##          Azure Copy               ##
+##########################################
+
+  ## @mcp { name: "Deploy_Az_Copy_Storage", type: "string", required: true, description: "Azure Storage Account name for this environment.", example: "stmyappdev01", scope: "env" }
+  # Deploy_Az_Copy_Storage: 'stmyappdev01'
+
+  ## @mcp { name: "Deploy_Az_Copy_TargetPath", type: "string", required: false, description: "Blob container or file share path target.", example: "mycontainer/subfolder", scope: "env" }
+  # Deploy_Az_Copy_TargetPath: ''
+
+  ## @mcp { name: "Deploy_Az_Copy_TargetName", type: "string", required: false, description: "Azure File Share name (when Deploy_Az_Copy_Type=AzureFileShare).", example: "myfileshare", scope: "env" }
+  # Deploy_Az_Copy_TargetName: ''
+
+  ## @mcp { name: "Deploy_Az_Copy_StorageRG", type: "string", required: false, description: "Resource Group of the storage account (required for File Share key lookup).", example: "rg-storage-dev", scope: "env" }
+  # Deploy_Az_Copy_StorageRG: ''
+
+  ## @mcp { name: "Deploy_Az_Copy_Clean", type: "string", required: false, description: "When 'true', deletes existing blobs/files before copying.", example: "false", validValues: ["true", "false"], default: "false", scope: "env" }
+  # Deploy_Az_Copy_Clean: 'false'
+
+## @mcp-section { name: "Installer Deploy", description: "Per-environment installer run settings. Requires Deploy_Installer_Enabled='true' in service-config.yaml.", scope: "deployType:installer", relatedTemplate: "installer-deploy.yaml" }
+    #############################
+  ##         Installer           ##
+#####################################
+
+  ## @mcp { name: "Deploy_Installer_Path", type: "string", required: false, description: "Path to the installer executable for this environment.", example: "$(Pipeline.Workspace)/drop/setup.exe", scope: "env" }
+  # Deploy_Installer_Path: ''
+
+  ## @mcp { name: "Deploy_Installer_Server", type: "string", required: false, description: "Target server hostname for remote installer execution.", example: "MYSERVER01.domain.net", scope: "env" }
+  # Deploy_Installer_Server: ''
+
+## @mcp-section { name: "Tomcat Deploy", description: "Per-environment Tomcat WAR deployment settings. Requires Deploy_Tomcat_Enabled='true' in service-config.yaml.", scope: "deployType:tomcat", relatedTemplate: "tomcat-deploy.yaml" }
+    ############################
+  ##          Tomcat            ##
+####################################
+
+  ## @mcp { name: "Deploy_Env_Servers", type: "string", required: true, description: "Target Tomcat server hostname.", example: "MYTOMCATSERVER01.domain.net", scope: "env" }
+  # Deploy_Env_Servers: 'MYTOMCATSERVER01.domain.net'
+
+  ## @mcp { name: "Deploy_Env_UserName", type: "string", required: true, description: "Server login username for Tomcat deployment. Use KeyVault secret reference.", example: "$(Tomcat-User)", scope: "env" }
+  # Deploy_Env_UserName: ''
+
+## @mcp-section { name: "Maven Deploy", description: "Per-environment Maven/Java Web App deployment settings. Requires Deploy_Maven_Enabled='true' in service-config.yaml.", scope: "deployType:maven", relatedTemplate: "maven-deploy.yaml" }
+    ##########################
+  ##          Maven           ##
+##################################
+
+  ## @mcp { name: "Deploy_Env_WebAppName", type: "string", required: true, description: "Azure Web App name for Maven deployment.", example: "myapp-java-dev", scope: "env" }
+  # Deploy_Env_WebAppName: ''
+
+  ## @mcp { name: "Deploy_Env_VirtualApplication", type: "string", required: false, description: "Virtual application path for the Maven deployment.", example: "/", scope: "env" }
+  # Deploy_Env_VirtualApplication: ''
+
+  ## @mcp { name: "Deploy_azureSubscription", type: "string", required: true, description: "Azure subscription/service connection for Maven deployment.", example: "MyApp-Dev-RG", scope: "env" }
+  # Deploy_azureSubscription: ''
+
+## @mcp-section { name: "Power BI Deploy", description: "Per-environment Power BI deployment settings. Requires Deploy_PowerBI_Enabled='true' in service-config.yaml.", scope: "deployType:powerbi", relatedTemplate: "power-bi-deploy.yaml" }
+    #############################
+  ##           PowerBI           ##
+#####################################
+
+  ## @mcp { name: "Deploy_PowerBI_Args", type: "string", required: false, description: "Arguments for Power BI deployment script per environment.", example: "-WorkspaceName MyWorkspace-Dev -DatasetName MyDataset", scope: "env" }
+  # Deploy_PowerBI_Args: ''
+
+## @mcp-section { name: "Power Platform Deploy", description: "Per-environment Power Platform deployment settings. Requires Deploy_PowerPlatform_Enabled='true' in service-config.yaml.", scope: "deployType:powerplatform", relatedTemplate: "powerplatform-deploy.yaml" }
+    ##################################
+  ##        Power Platform            ##
+##########################################
+
+  ## @mcp { name: "Deploy_PowerPlatform_PowerPlatformSPN", type: "string", required: true, description: "Azure DevOps service connection for Power Platform SPN authentication in this environment.", example: "PowerPlatform-MyApp-DevOps-QA", scope: "env" }
+  # Deploy_PowerPlatform_PowerPlatformSPN: 'PowerPlatform-MyApp-DevOps-QA'
+
+  ## @mcp { name: "Deploy_PowerPlatform_SolutionType", type: "string", required: false, description: "Solution import type override per environment.", example: "Managed", validValues: ["Managed", "Unmanaged", "Both"], default: "Managed", scope: "env" }
+  # Deploy_PowerPlatform_SolutionType: 'Managed'
+
+## @mcp-section { name: "APIC Deploy", description: "Per-environment API Connect deployment settings. Requires Deploy_APIC_Enabled='true' in service-config.yaml.", scope: "deployType:apic", relatedTemplate: "apic-deploy.yaml" }
+    ##########################
+  ##           APIC           ##
+##################################
+
+  ## @mcp { name: "Deploy_APIC_Space", type: "string", required: false, description: "API Connect catalog space name for this environment.", example: "Insurance-Dev", scope: "env" }
+  # Deploy_APIC_Space: ''
+
+  ## @mcp { name: "Deploy_APIC_Catalog_Prefix", type: "string", required: false, description: "API Connect catalog URL prefix for this environment.", example: "sb", scope: "env" }
+  # Deploy_APIC_Catalog_Prefix: ''
+
+## @mcp-section { name: "PEGA Deploy", description: "Per-environment Pega Platform deployment settings. Requires Deploy_Pega_Enabled='true' in service-config.yaml. All Pega env-specific config is resolved via KeyVault secrets keyed on the environment name.", scope: "deployType:pega", relatedTemplate: "pega-deploy.yaml" }
+    ##########################
+  ##           PEGA           ##
+##################################
+  # Note: Pega deployments resolve environment-specific configuration internally
+  # via KeyVault secrets keyed on the environment name. No additional per-env
+  # variables are needed in this file.
+
+## @mcp-section { name: "PS / DotNet Custom Deploy", description: "Per-environment custom PowerShell deployment settings. Requires Deploy_dotnet_custom='true' in service-config.yaml.", scope: "deployType:dotnet_custom", relatedTemplate: "ps-deploy.yaml" }
+    ####################################
+  ##      PS / DotNet Custom            ##
+############################################
+
+  ## @mcp { name: "Deploy_dotnet_AppServer", type: "string", required: true, description: "Target application server hostname for custom PS deploy.", example: "MYAPPSERVER01.domain.net", scope: "env" }
+  # Deploy_dotnet_AppServer: 'MYAPPSERVER01.domain.net'

@@ -1,0 +1,11 @@
+
+timestamp,status,Log message
+2026-05-05T15:01:12.442Z,ERROR,"[05-05-2026 15:01:12 ERR 91] <a1c4e8d2b9f744e6b5a09a3f7812d011> U:"anonymous" HTTP "POST" "/api/v1.0/policies" responded 500 in 1642.8874 ms"
+2026-05-05T15:01:12.443Z,ERROR,"[05-05-2026 15:01:12 ERR 91] <a1c4e8d2b9f744e6b5a09a3f7812d011> CreateSkeletonQueryHandler Failed: Mapping error for PCS field 'gelr' -> IRIS field 'POPT01'; duplicate mapping detected"
+2026-05-05T15:01:12.443Z,ERROR,"[05-05-2026 15:01:12 ERR 91] <a1c4e8d2b9f744e6b5a09a3f7812d011> "GetPolicy" completed with domain errors: "Field mapping conflict: IRIS field POPT01 mapped multiple times""
+2026-05-05T15:03:48.991Z,ERROR,"[05-05-2026 15:03:48 ERR 101] <c7e91ab48dcf4f18a64e92a7e3bc9f21> U:"anonymous" HTTP "POST" "/api/v1.0/policies" responded 500 in 2123.4009 ms"
+2026-05-05T15:03:48.992Z,ERROR,"[05-05-2026 15:03:48 ERR 101] <c7e91ab48dcf4f18a64e92a7e3bc9f21> CreateSkeletonQueryHandler Failed: PCS payload contains 'businessSegment' mapped to IRIS 'POPC01' which is not enabled in Phase 1"
+2026-05-05T15:03:48.992Z,ERROR,"[05-05-2026 15:03:48 ERR 101] <c7e91ab48dcf4f18a64e92a7e3bc9f21> "GetPolicy" completed with domain errors: "Invalid field mapping: POPC01 is out of scope for current delivery phase""
+2026-05-05T15:06:27.310Z,ERROR,"[05-05-2026 15:06:27 ERR 83] <9de1bb40eae0427ca66b2a61c35c10ec> U:"anonymous" HTTP "POST" "/api/v1.0/policies" responded 500 in 1874.7789 ms"
+2026-05-05T15:06:27.311Z,ERROR,"[05-05-2026 15:06:27 ERR 83] <9de1bb40eae0427ca66b2a61c35c10ec> CreateSkeletonQueryHandler Failed: PCS field 'policyOrLayer' mapped to IRIS field 'POPTCD' with unsupported dictionary value 'PRIMARY'"
+2026-05-05T15:06:27.311Z,ERROR,"[05-05-2026 15:06:27 ERR 83] <9de1bb40eae0427ca66b2a61c35c10ec> "GetPolicy" completed with domain errors: "Dictionary mapping failure for POPTCD: value not found in IRIS dictionary""
